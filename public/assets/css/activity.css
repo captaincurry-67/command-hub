@@ -82,6 +82,13 @@
   text-align: left;
 }
 
+.activity-name-cell img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .activity-name {
   font-weight: 600;
   color: var(--color-text);
