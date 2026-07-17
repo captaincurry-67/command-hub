@@ -1,0 +1,12 @@
+# Raw/unrenamed source images already copied into assets/img
+Media/
+
+# Local Claude Code tooling config (not part of the site)
+.claude/
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/

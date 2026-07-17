@@ -1,0 +1,47 @@
+/* ===================================================================
+   THEME VARIABLES
+   Change colors, fonts, and spacing here to re-skin the entire site.
+   Nothing below this file should ever have a hard-coded color/font.
+   =================================================================== */
+:root {
+  /* --- Brand palette (matched to 5thmr.org) --- */
+  --color-bg: #161920;
+  --color-bg-panel: #202225;
+  --color-bg-panel-raised: #2b3237;
+  --color-header-bg: #161920cc;
+  --color-gold: #ebae46;
+  --color-gold-bright: #ffa100;
+  --color-sage: #8db1a1;
+  --color-text: #ffffff;
+  --color-text-muted: #a9b2ae;
+  --color-border: #333a3f;
+  --color-open: #4caf6e;
+  --color-closed: #e5484d;
+  --color-filled: #ffffff;
+
+  /* --- Typography --- */
+  --font-display: "Jura", sans-serif;
+  --font-body: "Jura", -apple-system, "Segoe UI", sans-serif;
+
+  --fs-xs: 0.72rem;
+  --fs-sm: 0.85rem;
+  --fs-base: 1rem;
+  --fs-md: 1.15rem;
+  --fs-lg: 1.5rem;
+  --fs-xl: 2.2rem;
+
+  /* --- Spacing scale --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* --- Misc --- */
+  --radius: 5px;
+  --connector-color: var(--color-gold);
+  --shadow-card: 0 4px 8px rgba(0, 0, 0, 0.1);
+  --max-content-width: 1400px;
+}

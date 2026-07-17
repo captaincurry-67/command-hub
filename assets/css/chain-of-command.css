@@ -1,0 +1,316 @@
+/* ===================================================================
+   CHAIN OF COMMAND PAGE
+   Flat bordered tables + straight connector lines, styled after the
+   unit's own reference spreadsheet: Regiment -> Battalions -> Companies,
+   plus two standalone rosters (Warrant Officers, Reserves) that are NOT
+   part of the connected hierarchy.
+   =================================================================== */
+
+.coc-tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---------- Tier label bars (e.g. "Battalion Command") ---------- */
+.coc-tier-bar {
+  width: 100%;
+  max-width: 700px;
+  background-color: var(--color-bg-panel-raised);
+  border: 1px solid var(--color-border);
+  border-bottom: 2px solid var(--color-gold);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.coc-tier-bar--top {
+  max-width: 560px;
+  margin-top: 0;
+}
+
+.coc-tier-bar--full {
+  max-width: none;
+}
+
+/* Connecting stem from the table above into the next tier bar */
+.coc-tier-bar:not(.coc-tier-bar--top) {
+  position: relative;
+  margin-top: 40px;
+}
+
+.coc-tier-bar:not(.coc-tier-bar--top)::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 2px;
+  height: 24px;
+  background: var(--connector-color);
+  transform: translateX(-50%);
+}
+
+/* ---------- Table (flat, bordered — not a card) ---------- */
+.coc-table {
+  background-color: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  width: 100%;
+}
+
+.coc-table__header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--fs-sm);
+}
+
+.coc-table__header span {
+  padding: var(--space-2) var(--space-4);
+  color: #16191f;
+}
+
+.coc-table__header span:first-child {
+  border-right: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.coc-table--regiment .coc-table__header,
+.coc-table--battalion .coc-table__header {
+  background-color: var(--color-gold);
+}
+
+.coc-table--company .coc-table__header {
+  background-color: var(--color-gold-bright);
+}
+
+.coc-table--roster .coc-table__header {
+  background-color: var(--color-sage);
+}
+
+.coc-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+}
+
+.coc-row__rank {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: var(--space-2) var(--space-4);
+  border-right: 1px solid var(--color-border);
+}
+
+.coc-row__insignia {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.coc-row__insignia--placeholder {
+  width: 22px;
+  height: 22px;
+  border: 1px dashed var(--color-border);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.coc-row__code {
+  color: var(--color-gold);
+  font-weight: 600;
+}
+
+.coc-row__name {
+  padding: var(--space-2) var(--space-4);
+  font-weight: 600;
+  color: var(--color-filled);
+}
+
+.coc-row__name--vacant {
+  color: var(--color-open);
+  text-transform: uppercase;
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+}
+
+.coc-closed-label {
+  color: var(--color-closed);
+  text-transform: uppercase;
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+}
+
+/* ---------- Regiment (top of tree) ---------- */
+.coc-regiment {
+  max-width: 560px;
+}
+
+/* ---------- Branch connectors (straight lines, like a flowchart) ---------- */
+.coc-branch {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.coc-branch--battalions {
+  gap: var(--space-6);
+}
+
+.coc-branch--companies {
+  gap: var(--space-4);
+  padding-top: 24px;
+}
+
+.coc-branch-item {
+  position: relative;
+  padding-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Battalion columns size to fit however many company cards they hold */
+.coc-branch--battalions > .coc-branch-item {
+  flex: 0 0 auto;
+}
+
+/* Individual company cards keep a fixed column width */
+.coc-branch--companies > .coc-branch-item {
+  flex: 0 0 300px;
+}
+
+.coc-branch-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 24px;
+  background: var(--connector-color);
+  transform: translateX(-50%);
+}
+
+.coc-branch-item::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--connector-color);
+}
+
+.coc-branch-item:first-child::after {
+  left: 50%;
+}
+
+.coc-branch-item:last-child::after {
+  right: 50%;
+}
+
+.coc-branch-item--only::after {
+  content: none;
+}
+
+.coc-battalion-block {
+  width: 100%;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.coc-battalion-table,
+.coc-company-table {
+  max-width: 340px;
+}
+
+.coc-companies-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---------- Standalone rosters (Warrant Officers / Reserves) ---------- */
+.coc-standalone-section {
+  width: 100%;
+  margin-top: var(--space-7);
+  padding-top: var(--space-5);
+  border-top: 1px dashed var(--color-border);
+}
+
+.coc-standalone-caption {
+  text-align: center;
+  color: var(--color-sage);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--fs-xs);
+  margin-bottom: var(--space-5);
+}
+
+.coc-standalone-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-6);
+  width: 100%;
+}
+
+.coc-standalone {
+  max-width: 380px;
+  flex: 1 1 320px;
+}
+
+.coc-roster-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.coc-roster-list li {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+}
+
+.coc-roster-empty {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-style: italic;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 720px) {
+  .coc-branch--battalions,
+  .coc-branch--companies {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .coc-branch-item::after {
+    content: none;
+  }
+
+  .coc-tier-bar--full {
+    max-width: 700px;
+  }
+}
