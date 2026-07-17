@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin | 5th Marine Regiment Command Hub</title>
+  <link rel="stylesheet" href="assets/css/variables.css" />
+  <link rel="stylesheet" href="assets/css/base.css" />
+  <link rel="stylesheet" href="assets/css/layout.css" />
+  <link rel="stylesheet" href="assets/css/auth.css" />
+  <link rel="stylesheet" href="assets/css/admin.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__brand">
+      <img class="site-header__logo" src="assets/img/logo.png" alt="5th Marine Regiment crest" />
+      5th Marine <span>Regiment Command Hub</span>
+    </div>
+    <nav>
+      <ul class="site-nav">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="chain-of-command.html">Chain of Command</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="page-shell">
+    <h1 class="page-title">Regimental Command Admin</h1>
+
+    <section class="admin-section">
+      <h2 class="admin-section__title">Officers</h2>
+      <div id="officer-callout"></div>
+      <table class="admin-table">
+        <thead>
+          <tr><th>Username</th><th>Email</th><th>Tier</th><th>Added</th><th></th></tr>
+        </thead>
+        <tbody id="officers-body"></tbody>
+      </table>
+
+      <form id="add-officer-form" class="admin-form">
+        <div class="auth-field">
+          <label for="new-username">Username</label>
+          <input type="text" id="new-username" required minlength="3" />
+        </div>
+        <div class="auth-field">
+          <label for="new-email">Email</label>
+          <input type="email" id="new-email" required />
+        </div>
+        <div class="auth-field">
+          <label for="new-tier">Tier</label>
+          <select id="new-tier">
+            <option value="company_command">Company Command</option>
+            <option value="battalion_command">Battalion Command</option>
+            <option value="regimental_command">Regimental Command</option>
+          </select>
+        </div>
+        <button type="submit" class="admin-btn admin-btn--primary">Add Officer</button>
+      </form>
+    </section>
+
+    <section class="admin-section">
+      <h2 class="admin-section__title">Chain of Command Editor</h2>
+      <div id="hierarchy-message"></div>
+      <div id="hierarchy-editor">Loading&hellip;</div>
+    </section>
+  </main>
+
+  <div class="save-bar">
+    <button id="save-hierarchy" class="admin-btn admin-btn--primary">Save Changes</button>
+    <span id="save-status" style="color: var(--color-text-muted); font-size: var(--fs-sm);"></span>
+  </div>
+
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/nav.js"></script>
+  <script src="assets/js/admin.js"></script>
+</body>
+</html>

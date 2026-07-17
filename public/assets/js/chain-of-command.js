@@ -1,11 +1,11 @@
 /* ===================================================================
    CHAIN OF COMMAND RENDERER
-   Reads data/chain-of-command.json and builds the org-chart tree.
-   Add a battalion or company by editing the JSON file only — this
-   script never needs to change for that.
+   Reads the roster from /api/hierarchy (Cloudflare D1, via the Worker)
+   and builds the org-chart tree. Regimental Command edits the roster
+   through the Admin panel — this script never needs to change for that.
    =================================================================== */
 
-const DATA_URL = "data/chain-of-command.json";
+const DATA_URL = "/api/hierarchy";
 
 const RANK_ICONS = {
   "O-1": "assets/img/ranks/o1-2ndlt.png",
@@ -26,6 +26,7 @@ const RANK_ICONS = {
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
+    if (value === null || value === undefined) continue;
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
     else node.setAttribute(key, value);

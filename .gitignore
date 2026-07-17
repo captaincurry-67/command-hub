@@ -10,3 +10,7 @@ Thumbs.db
 
 # Editor
 .vscode/
+
+# Wrangler local dev state (local D1 sqlite, etc.)
+.wrangler/
+node_modules/

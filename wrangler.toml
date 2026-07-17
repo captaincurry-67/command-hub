@@ -1,5 +1,14 @@
 name = "command-hub"
+main = "src/worker.js"
 compatibility_date = "2024-09-01"
 
 [assets]
-directory = "."
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "5thmr-command-hub-db"
+database_id = "c27e17f8-84c4-4f85-867d-22e342eed695"
