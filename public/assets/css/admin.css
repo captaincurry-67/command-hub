@@ -16,12 +16,18 @@
   padding-bottom: var(--space-2);
 }
 
+.admin-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: var(--space-5);
+}
+
 .admin-table {
   width: 100%;
+  min-width: 520px;
   border-collapse: collapse;
   background-color: var(--color-bg-panel);
   border: 1px solid var(--color-border);
-  margin-bottom: var(--space-5);
   font-size: var(--fs-sm);
 }
 
