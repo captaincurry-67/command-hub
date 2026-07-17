@@ -1,4 +1,4 @@
-# 5th Marine Regimental Command Hub — Beginner's Guide
+# 5th Marine Regiment Command Hub — Beginner's Guide
 
 This guide assumes you've never built or deployed a website before. Follow it top to bottom the first time; after that, you'll mostly only need **Part 3** (editing the roster) and the last step of **Part 6** (pushing an update).
 

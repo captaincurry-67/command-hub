@@ -17,6 +17,10 @@ const RANK_ICONS = {
   "O-7": "assets/img/ranks/o7-briggen.png",
   "O-8": "assets/img/ranks/o8-majgen.png",
   "O-9": "assets/img/ranks/o9-ltgen.png",
+  "CW-2": "assets/img/ranks/cw2-cwo2.png",
+  "CW-3": "assets/img/ranks/cw3-cwo3.png",
+  "CW-4": "assets/img/ranks/cw4-cwo4.png",
+  "CW-5": "assets/img/ranks/cw5-cwo5.png",
 };
 
 function el(tag, attrs = {}, children = []) {

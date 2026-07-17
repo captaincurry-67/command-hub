@@ -1,4 +1,4 @@
-# 5th Marine Regimental Command Hub
+# 5th Marine Regiment Command Hub
 
 Website for the 5th Marine Discord mil-sim community. Static HTML/CSS/JS, hosted free on Cloudflare Pages.
 
