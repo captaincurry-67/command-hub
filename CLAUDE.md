@@ -131,8 +131,9 @@ const RATE_TARGETS = {
 // INTRA-REGIMENTAL (added 2026-07-18, canRateTarget()): within Regimental Command, rating
 // follows strict rank seniority — a regimental officer can rate regimental officers of
 // STRICTLY lower rank (O-8 → O-7 + O-6s; O-7 → O-6s; O-6 peers can NOT rate each other).
-// No special-casing of top ranks: whoever has nobody above them is simply never rated
-// (today O-8, since the O-9 seat is closed). rankIndex() parses "O-N" → N for comparison;
+// EXCEPTION (2026-07-19, team policy): the O-7 may also rate the O-8 — so Kenobi (O-7) and
+// Hombrger (O-8) can rate each other. Otherwise whoever has nobody above them is simply
+// never rated. rankIndex() parses "O-N" → N for comparison;
 // resolveViewerRating() returns { group, rank } (replaced resolveViewerGroup).
 ```
 Weeks are computed on the fly (`mondayOf()` UTC); nothing pre-generated. Quarter = calendar quarter of the *viewed* month.

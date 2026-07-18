@@ -404,10 +404,11 @@ function rankIndex(rank) {
 }
 
 // Within Regimental Command, rating follows strict seniority: only a strictly
-// higher rank may rate (so the top-ranked officer is never rated by anyone).
-// Everything else uses the group matrix.
+// higher rank may rate. One exception per unit policy: the O-7 may also rate
+// the O-8. Everything else uses the group matrix.
 function canRateTarget(viewer, targetGroup, targetRank) {
   if (viewer.group === "regimental" && targetGroup === "regimental") {
+    if (viewer.rank === "O-7" && targetRank === "O-8") return true;
     return rankIndex(viewer.rank) > rankIndex(targetRank);
   }
   return (RATE_TARGETS[viewer.group] || []).includes(targetGroup);
