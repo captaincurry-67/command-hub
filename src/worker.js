@@ -397,8 +397,20 @@ function rankGroup(rank) {
   return RANK_GROUPS[rank] || null;
 }
 
-function canRate(raterGroup, targetGroup) {
-  return (RATE_TARGETS[raterGroup] || []).includes(targetGroup);
+// "O-8" -> 8; non-officer codes (warrant etc.) -> 0, so they never outrank anyone
+function rankIndex(rank) {
+  const m = /^O-(\d)$/.exec(rank || "");
+  return m ? Number(m[1]) : 0;
+}
+
+// Within Regimental Command, rating follows strict seniority: only a strictly
+// higher rank may rate (so the top-ranked officer is never rated by anyone).
+// Everything else uses the group matrix.
+function canRateTarget(viewer, targetGroup, targetRank) {
+  if (viewer.group === "regimental" && targetGroup === "regimental") {
+    return rankIndex(viewer.rank) > rankIndex(targetRank);
+  }
+  return (RATE_TARGETS[viewer.group] || []).includes(targetGroup);
 }
 
 function mondayOf(date) {
@@ -438,15 +450,20 @@ function quarterRange(year, month) {
   return { start, end, label: `Q${q + 1} ${year}` };
 }
 
-async function resolveViewerGroup(env, officer) {
-  if (officer.tier === "regimental_command") return "regimental";
+async function resolveViewerRating(env, officer) {
+  // The viewer's seat rank is needed for the intra-regimental seniority rule;
+  // a seatless viewer gets rank null (rankIndex 0 — outranks no one).
+  let rank = null;
   const data = await getHierarchyData(env);
   if (officer.current_position_id && data) {
     const positions = flattenPositions(data);
     const pos = positions.find((p) => p.id === officer.current_position_id);
-    if (pos) return rankGroup(pos.rank) || (officer.tier === "battalion_command" ? "battalion" : "lieutenant");
+    if (pos) rank = pos.rank;
   }
-  return officer.tier === "battalion_command" ? "battalion" : "lieutenant";
+  if (officer.tier === "regimental_command") return { group: "regimental", rank };
+  const group =
+    rankGroup(rank) || (officer.tier === "battalion_command" ? "battalion" : "lieutenant");
+  return { group, rank };
 }
 
 async function apiGetActivity(request, env, url) {
@@ -473,7 +490,7 @@ async function apiGetActivity(request, env, url) {
   // sorted to match this so the grid can be sectioned by unit in a sensible reading order.
   const positionOrder = new Map(positions.map((p, i) => [p.id, i]));
 
-  const viewerGroup = await resolveViewerGroup(env, officer);
+  const viewer = await resolveViewerRating(env, officer);
 
   const { results: activeOfficers } = await env.DB
     .prepare(
@@ -512,7 +529,7 @@ async function apiGetActivity(request, env, url) {
       section: pos.parentType === "regiment" ? "Regimental Command" : pos.unitLabel,
       ratings: ratingsByWeek,
       qtrAvg,
-      canRate: o.id !== officer.id && canRate(viewerGroup, group),
+      canRate: o.id !== officer.id && canRateTarget(viewer, group, pos.rank),
       _order: positionOrder.get(pos.id) ?? 0,
     });
   }
@@ -553,9 +570,9 @@ async function apiPutActivityRating(request, env) {
   const targetPos = positions.find((p) => p.id === target.current_position_id);
   if (!targetPos) return jsonResponse({ error: "Officer's seat not found" }, 404);
 
-  const viewerGroup = await resolveViewerGroup(env, officer);
+  const viewer = await resolveViewerRating(env, officer);
   const targetGroup = rankGroup(targetPos.rank);
-  if (!canRate(viewerGroup, targetGroup)) {
+  if (!canRateTarget(viewer, targetGroup, targetPos.rank)) {
     return jsonResponse({ error: "You don't have permission to rate this officer" }, 403);
   }
 

@@ -13,10 +13,11 @@
 - **Database**: Cloudflare D1 (SQLite) — name `5thmr-command-hub-db`, id `c27e17f8-84c4-4f85-867d-22e342eed695`, bound as `DB`.
 - **Auth**: Custom username/password. PBKDF2 (Web Crypto, SHA-256, 100k iterations, per-user 16-byte hex salt). Opaque 32-byte session tokens in a `sessions` table, cookie `session` (`HttpOnly; Secure; SameSite=Lax`, 14-day expiry). No JWT, no libraries.
 - **Email**: Resend API (`fetch` to `https://api.resend.com/emails`), from `5th Marine Regiment Command Hub <onboarding@resend.dev>` (shared test domain — deliberate choice, user declined custom domain DNS). Secret `RESEND_API_KEY` set via wrangler.
-- **Server Stats data**: a Discord bot appends every server join/leave to a Google Sheet (raw log in cols A–C: `Date` `DD/MM/YYYY HH:MM:SS`, `User`, `Join/Leave`; cols E–I hold the user's manual daily summary, which the Worker ignores — everything is computed from the raw log). Published-as-CSV URL: `https://docs.google.com/spreadsheets/d/e/2PACX-1vQUy5ynqu6dUacmXDa-k-48MLqFbab0la0NhdQE4IYEobjYAI_5ASnO-aRTM5ZyEWbcBGQj92GJ59y5/pub?gid=1392691594&single=true&output=csv` — stored as secret `SHEET_CSV_URL` (prod: wrangler secret; local: `.dev.vars`, gitignored). The Worker fetches + parses it in `/api/server-stats` with a 5-min in-isolate cache. **Prod secret not set yet.** ~1,530 events since 21 Feb 2026.
+- **Server Stats data**: a Discord bot appends every server join/leave to a Google Sheet (raw log in cols A–C: `Date` `DD/MM/YYYY HH:MM:SS`, `User`, `Join/Leave`; cols E–I hold the user's manual daily summary, which the Worker ignores — everything is computed from the raw log). Published-as-CSV URL: `https://docs.google.com/spreadsheets/d/e/2PACX-1vQUy5ynqu6dUacmXDa-k-48MLqFbab0la0NhdQE4IYEobjYAI_5ASnO-aRTM5ZyEWbcBGQj92GJ59y5/pub?gid=1392691594&single=true&output=csv` — stored as secret `SHEET_CSV_URL` (prod: wrangler secret; local: `.dev.vars`, gitignored). The Worker fetches + parses it in `/api/server-stats` with a 5-min in-isolate cache. Prod secret set 2026-07-18. 1,683 events since 21 Feb 2026 (incl. a backfilled 10–18 Jul gap: 42 exact joins recovered from Discord member data + 114 leaves spread evenly across the gap — see `G:\1. Claude Projects\discord-stats-bot\backfill.js`).
+- **The Discord bot itself** ("StatsReader", discord.js): hosted on **SparkedHost** — billing at billing.sparkedhost.com ("Basic Bot Hosting", ₹90.95/mo), panel at control.sparkedhost.us (server `02eb41ce`, "Login via Billing" SSO). It POSTs `{type, user}` to a Google Apps Script web app that appends the sheet row (the Apps Script stamps the date — so backfills must be pasted into the sheet directly, not POSTed). **It went down 10–18 Jul because the hosting was suspended over an unpaid invoice** — if Server Stats "Last 7 Days" ever shows all zeros, check SparkedHost billing first. A local backup copy lives at `G:\1. Claude Projects\discord-stats-bot\` (`start-bot.bat` auto-restart launcher; token hardcoded in `index.js`) — never run it while the hosted bot is up or every event logs twice.
 - **Hosting/Deploy**: Cloudflare Workers, free tier. **`git push` to `main` auto-deploys** via Cloudflare Workers Builds (GitHub repo `captaincurry-67/command-hub` connected). Live URL: `https://command-hub.5thmrcommandhub.workers.dev`
 - **Local dev**: `npx wrangler dev --local` on port 8787 (configured in `.claude/launch.json` as `command-hub-preview`). Local D1 state lives in `.wrangler/` (gitignored). The user's wrangler CLI is OAuth-logged-in as `captaincurryops@gmail.com` (account id `1a73f6294f7a66cbfb773324acc969f9`), so `--remote` D1 commands work non-interactively.
-- **Git identity** (repo-local): `captaincurry-67` / `captaincurryops@gmail.com`. Working dir: `C:\Users\rakes\Desktop\command-hub` (Windows, PowerShell + Git Bash).
+- **Git identity** (repo-local): `captaincurry-67` / `captaincurryops@gmail.com`. Working dir: `G:\1. Claude Projects\command-hub` (Windows, PowerShell + Git Bash; moved from Desktop 2026-07-18).
 
 ### wrangler.toml (exact, load-bearing)
 ```toml
@@ -119,8 +120,13 @@ const RATE_TARGETS = {
   captain:    ["captain", "lieutenant"],               // any company incl. own
   lieutenant: [],                                      // can rate nobody
 };
-// No self-rating anywhere. Regimental seats appear as rows but are never rateable.
-// PUT /api/activity/rating also rejects any weekStart !== current Monday (ISO date).
+// No self-rating anywhere. PUT /api/activity/rating rejects any weekStart !== current Monday.
+// INTRA-REGIMENTAL (added 2026-07-18, canRateTarget()): within Regimental Command, rating
+// follows strict rank seniority — a regimental officer can rate regimental officers of
+// STRICTLY lower rank (O-8 → O-7 + O-6s; O-7 → O-6s; O-6 peers can NOT rate each other).
+// No special-casing of top ranks: whoever has nobody above them is simply never rated
+// (today O-8, since the O-9 seat is closed). rankIndex() parses "O-N" → N for comparison;
+// resolveViewerRating() returns { group, rank } (replaced resolveViewerGroup).
 ```
 Weeks are computed on the fly (`mondayOf()` UTC); nothing pre-generated. Quarter = calendar quarter of the *viewed* month.
 
@@ -150,13 +156,13 @@ Last commit: "Add Server Stats analytics dashboard; make login the landing page"
 
 ## 5. Current State & Active Bugs
 
-- **No active bugs.** Last edits (`src/worker.js` `apiGetActivity`, `public/assets/js/activity-report.js`, `public/assets/css/activity.css`) implemented the three user corrections: full visibility for all tiers, `Title - Name` row format, unit section header rows. All verified locally and confirmed deployed (grepped live JS for `activity-section-row`).
-- Working tree is clean; everything is committed and pushed.
-- Note: `resolveViewerGroup()` in worker.js falls back to tier-based group if an officer has no seat; `VISIBLE_GROUPS` constant was removed when visibility opened up.
+- **No active bugs.** Project concluded 2026-07-18: Server Stats dashboard + login-first landing deployed and verified live (desktop + 375px mobile, all redirect cases curl-tested); Discord bot restarted on SparkedHost and the 10–18 Jul data gap backfilled into the sheet.
+- Working tree clean apart from this CLAUDE.md documentation update.
+- Note: `resolveViewerRating()` in worker.js falls back to tier-based group if an officer has no seat (seatless viewers get rank null → can never rate regimental targets); `VISIBLE_GROUPS` constant was removed when visibility opened up.
 
 ## 6. Immediate Next Steps
 
-1. **Discord bot may have stopped logging**: the sheet's last entry is 10 Jul 2026 (flagged to the user 18 Jul — Server Stats "Last 7 Days" shows zeros until the bot resumes). Server Stats analytics ideas offered but not yet requested: day-of-week/hour-of-day patterns, moving average, retention curve, returning-members list, CSV export.
+1. **User must pay the SparkedHost invoice before 22 Jul 2026** or the bot gets suspended again (that's what caused the 10–18 Jul outage). Bot restarted + gap backfilled 18 Jul; project concluded for now. Server Stats analytics ideas offered but not yet requested: day-of-week/hour-of-day patterns, moving average, retention curve, returning-members list, CSV export.
 2. **User action pending — remind them**: create accounts in Admin for the 6 seats still showing OPEN on the live Chain of Command: Massa (`bn1-co-1-pos-2`), Skeletonpilot (`bn1-co-1-pos-3`), Mizer (`bn1-co-1-pos-4`), Eli (`bn1-co-2-pos-2`), x2Hello (`bn1-co-2-pos-3`), Hammad (`bn1-co-2-pos-4`).
 3. **Bulk import of historical activity ratings** — user has an Excel "Activity Sheet" (weekly 0–5/LOA ratings, weeks starting 22/6/26) and promised to send the full export. When received: map names → officer ids, week columns → Monday ISO dates, generate INSERT statements into `activity_ratings` (respect the `UNIQUE(officer_id, week_start)` constraint), apply with `npx wrangler d1 execute 5thmr-command-hub-db --remote --file=...`. Dates in their sheet are DD/M/YY.
 4. **Ideas previously suggested, not yet requested/built** (raise only if user asks for more analytics): unit-level average rollups, ↑/↓ trend indicators, "needs attention" flags for consecutive low ratings, CSV export.
