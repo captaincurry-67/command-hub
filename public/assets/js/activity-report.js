@@ -129,7 +129,7 @@ function renderRow(row) {
 
   const weekCells = activityData.weeks.map((week) => {
     const value = row.ratings[week];
-    if (week === activityData.currentWeek && row.canRate) {
+    if ((activityData.editableWeeks || []).includes(week) && row.canRate) {
       return el("td", {}, [renderEditableCell(row, week, value)]);
     }
     return el("td", {}, [renderReadonlyCell(value)]);

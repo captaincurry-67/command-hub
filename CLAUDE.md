@@ -120,7 +120,14 @@ const RATE_TARGETS = {
   captain:    ["captain", "lieutenant"],               // any company incl. own
   lieutenant: [],                                      // can rate nobody
 };
-// No self-rating anywhere. PUT /api/activity/rating rejects any weekStart !== current Monday.
+// No self-rating anywhere. EDIT WINDOW (added 2026-07-19, isWeekEditable()): a week is
+// editable during its own 7 days plus 30 days after it ends (locked from day 37). weekStart
+// must be a real, non-future Monday. GET /api/activity returns `editableWeeks`; the client
+// renders dropdowns for editableWeeks ∩ canRate rows (activity-report.js).
+// ADMIN OVERRIDE: officers.is_admin = 1 (migration 003, one dedicated seatless "Admin"
+// account, tier regimental_command) bypasses BOTH the window and the rank matrix — can edit
+// any officer, any week. Corrections audit via activity_ratings.rated_by. Normal accounts
+// are never admins; the account must be flagged manually via SQL UPDATE.
 // INTRA-REGIMENTAL (added 2026-07-18, canRateTarget()): within Regimental Command, rating
 // follows strict rank seniority — a regimental officer can rate regimental officers of
 // STRICTLY lower rank (O-8 → O-7 + O-6s; O-7 → O-6s; O-6 peers can NOT rate each other).

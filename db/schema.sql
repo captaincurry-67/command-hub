@@ -12,10 +12,12 @@ CREATE TABLE IF NOT EXISTS officers (
   is_active INTEGER NOT NULL DEFAULT 1,
   display_name TEXT,
   current_position_id TEXT,
+  is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- One weekly activity rating per officer. '0'..'5' or 'LOA'. Only the current week is ever writable.
+-- One weekly activity rating per officer. '0'..'5' or 'LOA'. Editable for the week + 30 days
+-- after it ends; an is_admin account may edit any week.
 CREATE TABLE IF NOT EXISTS activity_ratings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   officer_id INTEGER NOT NULL REFERENCES officers(id),

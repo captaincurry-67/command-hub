@@ -421,6 +421,15 @@ function mondayOf(date) {
   return d;
 }
 
+// A week stays editable through its own 7 days plus a 30-day grace period after it
+// ends (day 37 onward is locked). The is_admin account bypasses this entirely.
+function isWeekEditable(weekStartIso) {
+  const weekStart = Date.parse(weekStartIso + "T00:00:00Z");
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return todayUtc < weekStart + 37 * 24 * 60 * 60 * 1000;
+}
+
 function isoDate(d) {
   return d.toISOString().slice(0, 10);
 }
@@ -491,6 +500,8 @@ async function apiGetActivity(request, env, url) {
   const positionOrder = new Map(positions.map((p, i) => [p.id, i]));
 
   const viewer = await resolveViewerRating(env, officer);
+  const isAdmin = officer.is_admin === 1;
+  const editableWeeks = isAdmin ? [...weeks] : weeks.filter(isWeekEditable);
 
   const { results: activeOfficers } = await env.DB
     .prepare(
@@ -529,7 +540,7 @@ async function apiGetActivity(request, env, url) {
       section: pos.parentType === "regiment" ? "Regimental Command" : pos.unitLabel,
       ratings: ratingsByWeek,
       qtrAvg,
-      canRate: o.id !== officer.id && canRateTarget(viewer, group, pos.rank),
+      canRate: isAdmin || (o.id !== officer.id && canRateTarget(viewer, group, pos.rank)),
       _order: positionOrder.get(pos.id) ?? 0,
     });
   }
@@ -537,7 +548,7 @@ async function apiGetActivity(request, env, url) {
   rows.sort((a, b) => a._order - b._order);
   rows.forEach((r) => delete r._order);
 
-  return jsonResponse({ weeks, rows, quarterLabel: qLabel, currentWeek: isoDate(mondayOf(now)) });
+  return jsonResponse({ weeks, editableWeeks, rows, quarterLabel: qLabel, currentWeek: isoDate(mondayOf(now)) });
 }
 
 async function apiPutActivityRating(request, env) {
@@ -548,9 +559,15 @@ async function apiPutActivityRating(request, env) {
   if (!body) return jsonResponse({ error: "Invalid request body" }, 400);
   const { targetOfficerId, weekStart, rating } = body;
 
+  // weekStart must be a real Monday, not in the future.
   const currentWeek = isoDate(mondayOf(new Date()));
-  if (weekStart !== currentWeek) {
-    return jsonResponse({ error: "Only the current week can be rated" }, 400);
+  const weekDate = /^\d{4}-\d{2}-\d{2}$/.test(String(weekStart)) ? new Date(weekStart + "T00:00:00Z") : null;
+  if (!weekDate || Number.isNaN(weekDate.getTime()) || isoDate(mondayOf(weekDate)) !== weekStart || weekStart > currentWeek) {
+    return jsonResponse({ error: "Invalid week" }, 400);
+  }
+  const isAdmin = officer.is_admin === 1;
+  if (!isAdmin && !isWeekEditable(weekStart)) {
+    return jsonResponse({ error: "Ratings can only be changed within 30 days of the week's end" }, 400);
   }
   if (!["0", "1", "2", "3", "4", "5", "LOA"].includes(String(rating))) {
     return jsonResponse({ error: "Invalid rating value" }, 400);
@@ -570,10 +587,12 @@ async function apiPutActivityRating(request, env) {
   const targetPos = positions.find((p) => p.id === target.current_position_id);
   if (!targetPos) return jsonResponse({ error: "Officer's seat not found" }, 404);
 
-  const viewer = await resolveViewerRating(env, officer);
-  const targetGroup = rankGroup(targetPos.rank);
-  if (!canRateTarget(viewer, targetGroup, targetPos.rank)) {
-    return jsonResponse({ error: "You don't have permission to rate this officer" }, 403);
+  if (!isAdmin) {
+    const viewer = await resolveViewerRating(env, officer);
+    const targetGroup = rankGroup(targetPos.rank);
+    if (!canRateTarget(viewer, targetGroup, targetPos.rank)) {
+      return jsonResponse({ error: "You don't have permission to rate this officer" }, 403);
+    }
   }
 
   await env.DB
