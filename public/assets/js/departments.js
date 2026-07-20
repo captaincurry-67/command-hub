@@ -23,22 +23,11 @@ const MAINTENANCE_DEPARTMENT_NAMES = [
 const DEPARTMENT_NAMES = [...GAME_DEPARTMENT_NAMES, ...MAINTENANCE_DEPARTMENT_NAMES];
 
 const DEPARTMENT_DEFAULTS = {
-  BATTLEFIELD: [
-    { name: "Curry", rank: "Captain" },
-    { name: "Alex", rank: "Lieutenant" }
-  ],
-  "WAR THUNDER": [
-    { name: "Kenobi", rank: "Captain" }
-  ],
-  "HELLDIVERS 2": [
-    { name: "Yukki", rank: "Captain" }
-  ],
-  ENLISTED: [
-    { name: "Gatto", rank: "Lieutenant" }
-  ],
-  SQUAD: [
-    { name: "SpaceBall", rank: "Lieutenant" }
-  ],
+  BATTLEFIELD: [],
+  "WAR THUNDER": [],
+  "HELLDIVERS 2": [],
+  ENLISTED: [],
+  SQUAD: [],
   "HELL LET LOOSE": [],
   "LOGISTICS (TECH)": [],
   MEDIA: [],
