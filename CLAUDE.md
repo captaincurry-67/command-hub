@@ -89,7 +89,8 @@ Theme matches the community's main site **5thmr.org**. All colors/fonts via CSS 
 ```
 - Header brand: `5th Marine Regiment` **white** + `<span>Command Hub</span>` **gold** (`--color-gold`) — this exact split was user-corrected twice; don't change.
 - Footer on every page: exactly `5th Marine Regiment Command Hub` (no tagline).
-- Nav on the four gated pages ends with an external **HAB** link (game-server panel at `panel.we-studios.com`, `target="_blank" rel="noopener"`, visible to all officers — added via Kenobi's PR #1, merged 2026-07-19).
+- Nav on the four gated pages ends with two external links, both `target="_blank" rel="noopener"`, visible to all officers: **HAB** (game-server control panel at `panel.we-studios.com`, Kenobi's PR #1) and **Squad Browser** (public Squad server listing at `squadbrowser.app`, Kenobi's PR #2, merged 2026-07-20).
+- The stats page's user-facing name is **"Discord Stats"** (renamed from "Server Stats" in PR #2 — it shows Discord community data, not game-server data). File stays `server-stats.html`, API stays `/api/server-stats`.
 - Body background: `site-bg.jpg` under a dark gradient overlay, `background-attachment: fixed` was **removed** (caused scroll jank) — keep it `no-repeat`.
 - Table headers: bold (`font-weight: 700`), dark text `#16191f` on gold backgrounds.
 - Activity rating colors: `5:#3aa655, 4:#8bc34a, 3:#f6c343, 2:#f0973b, 1:#e2683a, 0:#e5484d, LOA:#ebae46`.
