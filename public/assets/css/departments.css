@@ -49,6 +49,32 @@
   margin-top: 0;
 }
 
+.dept-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.dept-section__button {
+  border: 1px solid var(--color-gold);
+  background: transparent;
+  color: var(--color-gold);
+  padding: 0.55rem 0.95rem;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.dept-section__button:hover {
+  background: rgba(235, 174, 70, 0.12);
+}
+
 .dept-section__title {
   margin: 0 0 var(--space-4);
   font-family: var(--font-display);
@@ -74,6 +100,39 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+
+.dept-card__header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.dept-card__small-button {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.dept-card__small-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dept-card__small-button--danger {
+  border-color: var(--color-closed);
+  color: var(--color-closed);
+}
+
+.dept-card__small-button--danger:hover {
+  background: rgba(229, 72, 77, 0.12);
 }
 
 .dept-card__header h2 {
@@ -212,6 +271,55 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+.dept-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.dept-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dept-field label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dept-field input,
+.dept-field select {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-panel-raised);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  /* custom arrow using layered gradients so arrow matches text color */
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-text) 50%),
+                    linear-gradient(135deg, var(--color-text) 50%, transparent 50%),
+                    linear-gradient(to right, transparent, transparent);
+  background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%, calc(100% - 2px) 50%;
+  background-size: 6px 6px, 6px 6px, 1px 100%;
+  background-repeat: no-repeat;
+  padding-right: 2.5rem;
+}
+
+.dept-field input:focus,
+.dept-field select:focus {
+  outline: none;
+  border-color: var(--color-gold);
+}
+
+/* Remove IE/Edge default expand */
+select::-ms-expand { display: none; }
 
 .dept-modal__actions {
   display: flex;
