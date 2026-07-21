@@ -49,8 +49,17 @@
   margin-top: 0;
 }
 
+.dept-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
 .dept-section__title {
-  margin: 0 0 var(--space-4);
+  margin: 0;
   font-family: var(--font-display);
   font-size: var(--fs-md);
   font-weight: 700;
@@ -59,12 +68,63 @@
   color: var(--color-gold);
 }
 
+.dept-section__button {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.dept-section__button:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
 .dept-card {
+  position: relative;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-top: 2px solid var(--color-gold);
   border-radius: var(--radius);
   overflow: hidden;
+  isolation: isolate;
+}
+
+/* Full key-art background (game departments): image fills the card, a dark
+   gradient keeps the roster table legible on top — same convention as the
+   site header's translucent bar over the hero background. */
+.dept-card--art {
+  background-image:
+    linear-gradient(180deg, rgba(22, 25, 32, 0.62) 0%, rgba(22, 25, 32, 0.9) 55%, var(--color-bg-panel) 100%),
+    var(--dept-bg-image);
+  background-size: cover;
+  background-position: center;
+}
+
+/* The header bar (title + Edit/Delete/Add Member) sits right where the art is
+   brightest and busiest — give it the site's own translucent header-bar
+   treatment so text and buttons stay legible no matter how bright the art is. */
+.dept-card--art .dept-card__header,
+.dept-card--icon .dept-card__header {
+  background: var(--color-header-bg);
+}
+
+/* Small corner icon watermark (maintenance departments): a muted low-profile
+   version of the same technique, peeking from the bottom-right corner. */
+.dept-card--icon {
+  background-image:
+    linear-gradient(200deg, rgba(22, 25, 32, 0.35) 0%, rgba(22, 25, 32, 0.9) 55%, var(--color-bg-panel) 100%),
+    var(--dept-bg-image);
+  background-repeat: no-repeat, no-repeat;
+  background-position: center, bottom -24px right -24px;
+  background-size: cover, 140px;
 }
 
 .dept-card__header {
@@ -74,6 +134,12 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+
+.dept-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .dept-card__header h2 {
@@ -101,6 +167,30 @@
 
 .dept-card__button:hover {
   background: rgba(235, 174, 70, 0.15);
+}
+
+.dept-card__small-button {
+  border: 1px solid var(--color-border);
+  background: rgba(22, 25, 32, 0.6);
+  color: var(--color-text-muted);
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.dept-card__small-button:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+.dept-card__small-button--danger:hover {
+  border-color: var(--color-closed);
+  color: var(--color-closed);
 }
 
 .dept-table {
@@ -255,21 +345,28 @@
   color: var(--color-text-muted);
 }
 
-.dept-field input {
+.dept-field input,
+.dept-field select {
   border: 1px solid var(--color-border);
   background: var(--color-bg-panel-raised);
   color: var(--color-text);
   border-radius: var(--radius);
   padding: 0.7rem 0.8rem;
+  font-size: var(--fs-sm);
 }
 
 @media (max-width: 720px) {
-  .page-heading {
+  .page-heading,
+  .dept-section__header {
     align-items: flex-start;
   }
 
   .dept-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dept-card__header-actions {
+    flex-wrap: wrap;
   }
 }

@@ -1,82 +1,27 @@
 /* ===================================================================
    DEPARTMENTS ROSTER VIEW
-   Renders 9 department cards and allows adding members to each card.
-   Data is stored in localStorage so the page works immediately without
-   a backend change.
+   Renders department cards from GET /api/departments (shared for the
+   whole unit, stored in D1). Membership is live-linked: the server
+   resolves each member's current rank/name fresh on every load, so a
+   promotion or reassignment shows up automatically. Every officer can
+   view; add/edit/delete controls appear only for Regimental Command,
+   saved via PUT /api/departments.
    =================================================================== */
 
-const GAME_DEPARTMENT_NAMES = [
-  "SQUAD",
-  "ENLISTED",
-  "HELLDIVERS 2",
-  "HELL LET LOOSE",
-  "WAR THUNDER",
-  "BATTLEFIELD"
-];
-
-const MAINTENANCE_DEPARTMENT_NAMES = [
-  "LOGISTICS (TECH)",
-  "MEDIA",
-  "SQUAD SERVER"
-];
-
-const DEPARTMENT_NAMES = [...GAME_DEPARTMENT_NAMES, ...MAINTENANCE_DEPARTMENT_NAMES];
-
-const DEPARTMENT_DEFAULTS = {
-  BATTLEFIELD: [
-    { name: "Curry", rank: "Captain" },
-    { name: "Alex", rank: "Lieutenant" }
-  ],
-  "WAR THUNDER": [
-    { name: "Kenobi", rank: "Captain" }
-  ],
-  "HELLDIVERS 2": [
-    { name: "Yukki", rank: "Captain" }
-  ],
-  ENLISTED: [
-    { name: "Gatto", rank: "Lieutenant" }
-  ],
-  SQUAD: [
-    { name: "SpaceBall", rank: "Lieutenant" }
-  ],
-  "HELL LET LOOSE": [],
-  "LOGISTICS (TECH)": [],
-  MEDIA: [],
-  "SQUAD SERVER": []
+// Local key-art / icon assets, keyed by department name (see assets/img/departments/).
+const DEPARTMENT_ART = {
+  SQUAD: { file: "squad.jpg", mode: "art" },
+  ENLISTED: { file: "enlisted.jpg", mode: "art" },
+  "HELLDIVERS 2": { file: "helldivers-2.jpg", mode: "art" },
+  "HELL LET LOOSE": { file: "hell-let-loose.jpg", mode: "art" },
+  "WAR THUNDER": { file: "war-thunder.jpg", mode: "art" },
+  BATTLEFIELD: { file: "battlefield.jpg", mode: "art" },
+  "LOGISTICS (TECH)": { file: "logistics.svg", mode: "icon" },
+  MEDIA: { file: "media.svg", mode: "icon" },
+  "SQUAD SERVER": { file: "squad-server.svg", mode: "icon" },
 };
 
-const STORAGE_KEY = "command-hub-departments";
-
-function loadDepartments() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEPARTMENT_DEFAULTS);
-    const parsed = JSON.parse(raw);
-    return normalizeDepartments(parsed);
-  } catch (err) {
-    console.error("Could not load department data", err);
-    return structuredClone(DEPARTMENT_DEFAULTS);
-  }
-}
-
-function normalizeDepartments(data) {
-  const departments = {};
-  for (const name of DEPARTMENT_NAMES) {
-    const existing = Array.isArray(data?.[name]) ? data[name] : [];
-    departments[name] = existing
-      .filter((member) => member && typeof member === "object")
-      .map((member) => ({
-        name: String(member.name || "").trim(),
-        rank: String(member.rank || "Member").trim() || "Member"
-      }))
-      .filter((member) => member.name);
-  }
-  return departments;
-}
-
-function saveDepartments(departments) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(departments));
-}
+let state = null; // full GET /api/departments response
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -92,176 +37,304 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-function createDepartmentCard(name, members, onAdd, onEdit, onRemove) {
-  const card = el("article", { class: "dept-card" }, [
+function officerTag(member) {
+  return member.rankCode ? `[${member.rankCode}] ${member.displayName}` : member.displayName;
+}
+
+async function persist(root, nextDepartments, nextCategoryMap) {
+  try {
+    await apiFetch("/api/departments", {
+      method: "PUT",
+      body: { departments: nextDepartments, categoryMap: nextCategoryMap },
+    });
+    state = await apiFetch("/api/departments");
+  } catch (err) {
+    alert(err.message);
+    state = await apiFetch("/api/departments");
+  }
+  renderDepartments(root);
+}
+
+// Departments as stored server-side ({officerId, role}), rebuilt from the
+// currently-displayed (resolved) state — used as the base for edits.
+function rawDepartments() {
+  const raw = {};
+  for (const [name, members] of Object.entries(state.departments)) {
+    raw[name] = members.map((m) => ({ officerId: m.officerId, role: m.role }));
+  }
+  return raw;
+}
+
+function createDepartmentCard(root, name, members) {
+  const art = DEPARTMENT_ART[name];
+  const cardAttrs = { class: art ? `dept-card dept-card--${art.mode}` : "dept-card" };
+  const card = el("article", cardAttrs, [
     el("div", { class: "dept-card__header" }, [
       el("h2", { text: name }),
-      el("button", { class: "dept-card__button", type: "button", text: "Add Member" })
+      state.canEdit
+        ? el("div", { class: "dept-card__header-actions" }, [
+            el("button", { class: "dept-card__small-button", type: "button", text: "Edit" }),
+            el("button", { class: "dept-card__small-button dept-card__small-button--danger", type: "button", text: "Delete" }),
+            el("button", { class: "dept-card__button", type: "button", text: "Add Member" }),
+          ])
+        : null,
     ]),
     el("table", { class: "dept-table" }, [
       el("thead", {}, [
         el("tr", {}, [
-          el("th", { text: "Rank" }),
+          el("th", { text: "Role" }),
           el("th", { text: "Name" }),
-          el("th", { text: "" })
-        ])
+          state.canEdit ? el("th", { text: "" }) : null,
+        ]),
       ]),
-      el("tbody", {}, members.length > 0
-        ? members.map((member, index) => el("tr", {}, [
-            el("td", { class: "dept-table__rank", text: member.rank || "Member" }),
-            el("td", { class: "dept-table__name", text: member.name }),
-            el("td", {}, [
-              el("div", { class: "dept-table__actions" }, [
-                el("button", {
-                  class: "dept-table__edit",
-                  type: "button",
-                  text: "Edit"
-                }),
-                el("button", {
-                  class: "dept-table__delete",
-                  type: "button",
-                  text: "Delete"
-                })
+      el(
+        "tbody",
+        {},
+        members.length > 0
+          ? members.map((member, index) =>
+              el("tr", {}, [
+                el("td", { class: "dept-table__rank", text: member.role }),
+                el("td", { class: "dept-table__name", text: officerTag(member) }),
+                state.canEdit
+                  ? el("td", {}, [
+                      el("div", { class: "dept-table__actions" }, [
+                        el("button", { class: "dept-table__edit", type: "button", text: "Edit" }),
+                        el("button", { class: "dept-table__delete", type: "button", text: "Delete" }),
+                      ]),
+                    ])
+                  : null,
               ])
-            ])
-          ]))
-        : [el("tr", {}, [el("td", { class: "dept-table__empty", colspan: "3", text: "No members assigned yet." })])])
-    ])
+            )
+          : [
+              el("tr", {}, [
+                el("td", { class: "dept-table__empty", colspan: state.canEdit ? "3" : "2", text: "No staff assigned yet." }),
+              ]),
+            ]
+      ),
+    ]),
   ]);
 
-  const button = card.querySelector(".dept-card__button");
-  button.addEventListener("click", () => onAdd(name));
+  if (art) card.style.setProperty("--dept-bg-image", `url("/assets/img/departments/${art.file}")`);
 
-  card.querySelectorAll(".dept-table__edit").forEach((editButton, index) => {
-    editButton.addEventListener("click", () => onEdit(name, index));
+  if (!state.canEdit) return card;
+
+  card.querySelector(".dept-card__header-actions button:nth-child(1)").addEventListener("click", () => {
+    const modal = createDepartmentModal(name, state.categoryMap[name], (updated) => {
+      const nextDepartments = rawDepartments();
+      const nextCategoryMap = { ...state.categoryMap };
+      if (updated.name !== name) {
+        if (nextDepartments[updated.name]) return alert("A department with that name already exists.");
+        nextDepartments[updated.name] = nextDepartments[name];
+        delete nextDepartments[name];
+        delete nextCategoryMap[name];
+      }
+      nextCategoryMap[updated.name] = updated.category;
+      persist(root, nextDepartments, nextCategoryMap);
+    });
+    root.appendChild(modal);
   });
 
-  card.querySelectorAll(".dept-table__delete").forEach((deleteButton, index) => {
-    deleteButton.addEventListener("click", () => onRemove(name, index));
+  card.querySelector(".dept-card__header-actions button:nth-child(2)").addEventListener("click", () => {
+    if (!confirm(`Delete department "${name}" and all its members? This cannot be undone.`)) return;
+    const nextDepartments = rawDepartments();
+    const nextCategoryMap = { ...state.categoryMap };
+    delete nextDepartments[name];
+    delete nextCategoryMap[name];
+    persist(root, nextDepartments, nextCategoryMap);
+  });
+
+  card.querySelector(".dept-card__button").addEventListener("click", () => {
+    const modal = createMemberModal(name, null, (member) => {
+      const nextDepartments = rawDepartments();
+      nextDepartments[name] = [...(nextDepartments[name] || []), member];
+      persist(root, nextDepartments, state.categoryMap);
+    });
+    root.appendChild(modal);
+  });
+
+  card.querySelectorAll(".dept-table__edit").forEach((btn, index) => {
+    btn.addEventListener("click", () => {
+      const current = members[index];
+      const modal = createMemberModal(name, current, (updatedMember) => {
+        const nextDepartments = rawDepartments();
+        nextDepartments[name] = [...nextDepartments[name]];
+        nextDepartments[name][index] = updatedMember;
+        persist(root, nextDepartments, state.categoryMap);
+      });
+      root.appendChild(modal);
+    });
+  });
+
+  card.querySelectorAll(".dept-table__delete").forEach((btn, index) => {
+    btn.addEventListener("click", () => {
+      const current = members[index];
+      if (!confirm(`Remove ${current.displayName} from ${name}?`)) return;
+      const nextDepartments = rawDepartments();
+      const list = [...nextDepartments[name]];
+      list.splice(index, 1);
+      nextDepartments[name] = list;
+      persist(root, nextDepartments, state.categoryMap);
+    });
   });
 
   return card;
 }
 
-function createModal(departmentName, initialMember, onSubmit) {
+function createMemberModal(departmentName, initialMember, onSubmit) {
   const backdrop = el("div", { class: "dept-modal-backdrop" }, [
     el("div", { class: "dept-modal" }, [
       el("h3", { text: initialMember ? `Edit member in ${departmentName}` : `Add member to ${departmentName}` }),
       el("form", { class: "dept-form" }, [
         el("div", { class: "dept-field" }, [
-          el("label", { for: "dept-member-name", text: "Name" }),
-          el("input", { id: "dept-member-name", name: "name", type: "text", required: true, value: initialMember?.name || "" })
+          el("label", { for: "dept-member-officer", text: "Officer" }),
+          el(
+            "select",
+            { id: "dept-member-officer", name: "officerId", required: true },
+            state.officerOptions.map((o) =>
+              el("option", {
+                value: String(o.officerId),
+                text: officerTag(o),
+                selected: initialMember?.officerId === o.officerId ? "selected" : null,
+              })
+            )
+          ),
         ]),
         el("div", { class: "dept-field" }, [
-          el("label", { for: "dept-member-rank", text: "Rank" }),
-          el("input", { id: "dept-member-rank", name: "rank", type: "text", value: initialMember?.rank || "Member" })
+          el("label", { for: "dept-member-role", text: "Role" }),
+          el(
+            "select",
+            { id: "dept-member-role", name: "role" },
+            state.departmentRoles.map((r) =>
+              el("option", { value: r, text: r, selected: (initialMember?.role || state.departmentRoles[2]) === r ? "selected" : null })
+            )
+          ),
         ]),
         el("div", { class: "dept-modal__actions" }, [
           el("button", { type: "button", text: "Cancel" }),
-          el("button", { type: "submit", text: initialMember ? "Save Changes" : "Save Member" })
-        ])
-      ])
-    ])
+          el("button", { type: "submit", text: initialMember ? "Save Changes" : "Save Member" }),
+        ]),
+      ]),
+    ]),
   ]);
 
   const form = backdrop.querySelector(".dept-form");
-  const cancel = backdrop.querySelector("button[type='button']");
-  cancel.addEventListener("click", () => backdrop.remove());
+  backdrop.querySelector("button[type='button']").addEventListener("click", () => backdrop.remove());
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const member = {
-      name: String(formData.get("name") || "").trim(),
-      rank: String(formData.get("rank") || "Member").trim() || "Member"
-    };
-    if (!member.name) return;
-    onSubmit(member);
+    const officerId = Number(formData.get("officerId"));
+    if (!officerId) return;
+    onSubmit({ officerId, role: String(formData.get("role") || state.departmentRoles[2]) });
     backdrop.remove();
   });
 
   return backdrop;
 }
 
-function renderDepartments(root, departments) {
+function createDepartmentModal(initialName, initialCategory, onSubmit) {
+  const backdrop = el("div", { class: "dept-modal-backdrop" }, [
+    el("div", { class: "dept-modal" }, [
+      el("h3", { text: initialName ? `Edit department ${initialName}` : "Add department" }),
+      el("form", { class: "dept-form" }, [
+        el("div", { class: "dept-field" }, [
+          el("label", { for: "dept-name", text: "Department Name" }),
+          el("input", { id: "dept-name", name: "name", type: "text", required: true, value: initialName || "" }),
+        ]),
+        el("div", { class: "dept-field" }, [
+          el("label", { for: "dept-category", text: "Category" }),
+          el("select", { id: "dept-category", name: "category" }, [
+            el("option", { value: "game", text: "Game Department", selected: (initialCategory || "game") === "game" ? "selected" : null }),
+            el("option", { value: "maintenance", text: "Maintenance Department", selected: initialCategory === "maintenance" ? "selected" : null }),
+          ]),
+        ]),
+        el("div", { class: "dept-modal__actions" }, [
+          el("button", { type: "button", text: "Cancel" }),
+          el("button", { type: "submit", text: initialName ? "Save Changes" : "Save Department" }),
+        ]),
+      ]),
+    ]),
+  ]);
+
+  const form = backdrop.querySelector(".dept-form");
+  backdrop.querySelector("button[type='button']").addEventListener("click", () => backdrop.remove());
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const name = String(formData.get("name") || "").trim();
+    if (!name) return;
+    onSubmit({ name, category: String(formData.get("category") || "game") });
+    backdrop.remove();
+  });
+
+  return backdrop;
+}
+
+function renderDepartments(root) {
   const gameGrid = el("div", { class: "dept-grid" });
   const maintenanceGrid = el("div", { class: "dept-grid" });
 
-  const renderSection = (names, grid) => {
-    for (const name of names) {
-      const members = departments[name] || [];
-      const card = createDepartmentCard(
-        name,
-        members,
-        (departmentName) => {
-          const modal = createModal(departmentName, null, (member) => {
-            const updated = loadDepartments();
-            updated[departmentName] = [...(updated[departmentName] || []), member];
-            saveDepartments(updated);
-            renderDepartments(root, updated);
-          });
-          root.appendChild(modal);
-        },
-        (departmentName, memberIndex) => {
-          const updated = loadDepartments();
-          const member = updated[departmentName]?.[memberIndex];
-          if (!member) return;
-          const modal = createModal(departmentName, member, (updatedMember) => {
-            const next = loadDepartments();
-            next[departmentName] = [...(next[departmentName] || [])];
-            next[departmentName][memberIndex] = updatedMember;
-            saveDepartments(next);
-            renderDepartments(root, next);
-          });
-          root.appendChild(modal);
-        },
-        (departmentName, memberIndex) => {
-          const updated = loadDepartments();
-          const list = [...(updated[departmentName] || [])];
-          list.splice(memberIndex, 1);
-          updated[departmentName] = list;
-          saveDepartments(updated);
-          renderDepartments(root, updated);
-        }
-      );
-      grid.appendChild(card);
-    }
-  };
+  for (const name of state.allDepartmentNames.game) {
+    gameGrid.appendChild(createDepartmentCard(root, name, state.departments[name] || []));
+  }
+  for (const name of state.allDepartmentNames.maintenance) {
+    maintenanceGrid.appendChild(createDepartmentCard(root, name, state.departments[name] || []));
+  }
 
-  renderSection(GAME_DEPARTMENT_NAMES, gameGrid);
-  renderSection(MAINTENANCE_DEPARTMENT_NAMES, maintenanceGrid);
+  const createSection = (title, category, grid) =>
+    el("div", { class: "dept-section" }, [
+      el("div", { class: "dept-section__header" }, [
+        el("h2", { class: "dept-section__title", text: title }),
+        state.canEdit
+          ? el("button", {
+              class: "dept-section__button",
+              type: "button",
+              text: `+ Add ${category === "game" ? "Game" : "Maintenance"} Department`,
+              onclick: () => {
+                const modal = createDepartmentModal("", category, (dept) => {
+                  const nextDepartments = rawDepartments();
+                  if (nextDepartments[dept.name]) return alert("A department with that name already exists.");
+                  nextDepartments[dept.name] = [];
+                  const nextCategoryMap = { ...state.categoryMap, [dept.name]: dept.category };
+                  persist(root, nextDepartments, nextCategoryMap);
+                });
+                root.appendChild(modal);
+              },
+            })
+          : null,
+      ]),
+      grid,
+    ]);
 
   const content = el("div", {}, [
     el("div", { class: "page-heading" }, [
       el("div", {}, [
         el("h1", { class: "page-title", text: "Departments" }),
-        el("p", { class: "page-subtitle", text: "A roster view for each department with quick member additions." })
+        el("p", {
+          class: "page-subtitle",
+          text: state.canEdit
+            ? "Shared department rosters — changes save for the whole unit."
+            : "Department rosters, maintained by Regimental Command.",
+        }),
       ]),
-      el("button", { class: "pill-button", type: "button", text: "Reset demo data" })
     ]),
-    el("div", { class: "dept-section" }, [
-      el("h2", { class: "dept-section__title", text: "Game Departments" }),
-      gameGrid
-    ]),
-    el("div", { class: "dept-section" }, [
-      el("h2", { class: "dept-section__title", text: "Maintenance Departments" }),
-      maintenanceGrid
-    ])
+    createSection("Game Departments", "game", gameGrid),
+    createSection("Maintenance Departments", "maintenance", maintenanceGrid),
   ]);
 
   root.replaceChildren(content);
-
-  const resetButton = root.querySelector(".pill-button");
-  resetButton?.addEventListener("click", () => {
-    saveDepartments(structuredClone(DEPARTMENT_DEFAULTS));
-    renderDepartments(root, loadDepartments());
-  });
 }
 
-function init() {
+async function init() {
   const root = document.getElementById("departments-root");
   if (!root) return;
-  renderDepartments(root, loadDepartments());
+  try {
+    state = await apiFetch("/api/departments");
+    renderDepartments(root);
+  } catch (err) {
+    root.replaceChildren(el("p", { class: "auth-message auth-message--error", text: err.message }));
+  }
 }
 
 init();

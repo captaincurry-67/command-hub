@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS hierarchy (
   updated_by INTEGER REFERENCES officers(id)
 );
 
+-- Departments roster: single-row JSON blob keyed by department name, values are
+-- arrays of { name, rank }. Viewable by all officers, editable by Regimental Command.
+CREATE TABLE IF NOT EXISTS departments (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by INTEGER REFERENCES officers(id)
+);
+
 CREATE TABLE IF NOT EXISTS hierarchy_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   data TEXT NOT NULL,

@@ -97,6 +97,8 @@ async function handleApi(request, env, path) {
   if (path === "/api/activity" && method === "GET") return apiGetActivity(request, env, url_(request));
   if (path === "/api/activity/rating" && method === "PUT") return apiPutActivityRating(request, env);
   if (path === "/api/server-stats" && method === "GET") return apiServerStats(request, env);
+  if (path === "/api/departments" && method === "GET") return apiGetDepartments(request, env);
+  if (path === "/api/departments" && method === "PUT") return apiPutDepartments(request, env);
 
   return jsonResponse({ error: "Not found" }, 404);
 }
@@ -839,6 +841,170 @@ async function parseJsonBody(request) {
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/* ---------------- departments roster ---------------- */
+// Membership is live-linked: only { officerId, role } is ever stored. Name and rank
+// are resolved fresh from the officers/hierarchy tables on every GET, so a promotion
+// or reassignment shows up automatically with no edit to the departments data itself.
+
+const GAME_DEPARTMENT_NAMES = ["SQUAD", "ENLISTED", "HELLDIVERS 2", "HELL LET LOOSE", "WAR THUNDER", "BATTLEFIELD"];
+const MAINTENANCE_DEPARTMENT_NAMES = ["LOGISTICS (TECH)", "MEDIA", "SQUAD SERVER"];
+const DEPARTMENT_NAMES = [...GAME_DEPARTMENT_NAMES, ...MAINTENANCE_DEPARTMENT_NAMES];
+const DEPARTMENT_ROLES = ["DEPARTMENT CO", "DEPARTMENT XO", "ASSISTING STAFF"];
+
+const DEFAULT_CATEGORY_MAP = Object.fromEntries(
+  DEPARTMENT_NAMES.map((name) => [name, GAME_DEPARTMENT_NAMES.includes(name) ? "game" : "maintenance"])
+);
+
+// Seed roster (from Kenobi's PR), by username so it resolves correctly against
+// whichever database is live (local test accounts vs. production officers) and is
+// silently skipped where the username doesn't exist. Only used until the first save
+// creates the DB row.
+const DEPARTMENT_SEED_USERNAMES = {
+  SQUAD: ["MajSpaceBall"],
+  ENLISTED: ["CaptGatto"],
+  "HELLDIVERS 2": ["LtColYukki"],
+  "WAR THUNDER": ["BGenKim"],
+  BATTLEFIELD: ["ColCurry", "CaptAlex"],
+};
+
+async function buildDefaultDepartmentsState(env) {
+  const departments = Object.fromEntries(DEPARTMENT_NAMES.map((n) => [n, []]));
+  const usernames = [...new Set(Object.values(DEPARTMENT_SEED_USERNAMES).flat())];
+  if (usernames.length) {
+    const { results } = await env.DB
+      .prepare(`SELECT id, username FROM officers WHERE is_active = 1 AND username IN (${usernames.map(() => "?").join(",")})`)
+      .bind(...usernames)
+      .all();
+    const idByUsername = new Map(results.map((o) => [o.username, o.id]));
+    for (const [dept, names] of Object.entries(DEPARTMENT_SEED_USERNAMES)) {
+      departments[dept] = names
+        .filter((n) => idByUsername.has(n))
+        .map((n) => ({ officerId: idByUsername.get(n), role: "ASSISTING STAFF" }));
+    }
+  }
+  return { departments, categoryMap: { ...DEFAULT_CATEGORY_MAP } };
+}
+
+function sanitizeDepartmentsState(state, validOfficerIds) {
+  const categoryMap = {};
+  const rawCategoryMap = state?.categoryMap && typeof state.categoryMap === "object" ? state.categoryMap : {};
+  const rawDepartments = state?.departments && typeof state.departments === "object" ? state.departments : {};
+
+  for (const name of Object.keys(rawDepartments)) {
+    const cleanName = String(name).trim().slice(0, 50);
+    if (!cleanName) continue;
+    // Respect an explicit category; otherwise fall back to the pinned default
+    // (for the 9 built-in names) before finally defaulting to "game".
+    const category =
+      rawCategoryMap[name] === "maintenance" || rawCategoryMap[name] === "game"
+        ? rawCategoryMap[name]
+        : DEFAULT_CATEGORY_MAP[name] || "game";
+    categoryMap[cleanName] = category;
+  }
+  // Pinned defaults always exist, even if absent from the incoming payload.
+  for (const name of DEPARTMENT_NAMES) categoryMap[name] = categoryMap[name] || DEFAULT_CATEGORY_MAP[name];
+
+  const departments = {};
+  for (const name of Object.keys(categoryMap)) {
+    const list = Array.isArray(rawDepartments[name]) ? rawDepartments[name] : [];
+    departments[name] = list
+      .map((m) => ({
+        officerId: Number(m?.officerId),
+        role: DEPARTMENT_ROLES.includes(m?.role) ? m.role : "ASSISTING STAFF",
+      }))
+      .filter((m) => Number.isInteger(m.officerId) && validOfficerIds.has(m.officerId))
+      .slice(0, 50);
+  }
+
+  return { departments, categoryMap };
+}
+
+function orderedDepartmentNames(categoryMap) {
+  const names = Object.keys(categoryMap);
+  const forCategory = (cat) => {
+    const pinned = DEPARTMENT_NAMES.filter((n) => categoryMap[n] === cat && names.includes(n));
+    const extra = names
+      .filter((n) => !DEPARTMENT_NAMES.includes(n) && categoryMap[n] === cat)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return [...pinned, ...extra];
+  };
+  return { game: forCategory("game"), maintenance: forCategory("maintenance") };
+}
+
+async function apiGetDepartments(request, env) {
+  const officer = await getSessionOfficer(request, env);
+  if (!officer) return jsonResponse({ error: "Not authenticated" }, 401);
+
+  const { results: activeOfficers } = await env.DB
+    .prepare("SELECT id, display_name, username, current_position_id FROM officers WHERE is_active = 1")
+    .all();
+  const officersById = new Map(activeOfficers.map((o) => [o.id, o]));
+
+  const hierarchyData = await getHierarchyData(env);
+  const positions = hierarchyData ? flattenPositions(hierarchyData) : [];
+  const positionOrder = new Map(positions.map((p, i) => [p.id, i]));
+  const positionsById = new Map(positions.map((p) => [p.id, p]));
+
+  const resolve = (officerId) => {
+    const o = officersById.get(officerId);
+    if (!o) return null;
+    const pos = o.current_position_id ? positionsById.get(o.current_position_id) : null;
+    return { officerId, displayName: o.display_name || o.username, rankCode: pos ? pos.rank : null };
+  };
+
+  const row = await env.DB.prepare("SELECT data FROM departments WHERE id = 1").first();
+  const state = row ? sanitizeDepartmentsState(JSON.parse(row.data), new Set(officersById.keys())) : await buildDefaultDepartmentsState(env);
+
+  const departments = {};
+  for (const [name, members] of Object.entries(state.departments)) {
+    departments[name] = members.map((m) => ({ ...resolve(m.officerId), role: m.role })).filter((m) => m.displayName);
+  }
+
+  const officerOptions = activeOfficers
+    .map((o) => ({
+      officerId: o.id,
+      displayName: o.display_name || o.username,
+      rankCode: o.current_position_id ? positionsById.get(o.current_position_id)?.rank || null : null,
+      _order: o.current_position_id ? positionOrder.get(o.current_position_id) ?? 9999 : 9999,
+    }))
+    .sort((a, b) => a._order - b._order || a.displayName.localeCompare(b.displayName))
+    .map(({ _order, ...rest }) => rest);
+
+  return jsonResponse({
+    departments,
+    categoryMap: state.categoryMap,
+    allDepartmentNames: orderedDepartmentNames(state.categoryMap),
+    officerOptions,
+    departmentRoles: DEPARTMENT_ROLES,
+    canEdit: officer.tier === "regimental_command",
+  });
+}
+
+async function apiPutDepartments(request, env) {
+  const officer = await getSessionOfficer(request, env);
+  if (!officer) return jsonResponse({ error: "Not authenticated" }, 401);
+  if (officer.tier !== "regimental_command") return jsonResponse({ error: "Forbidden" }, 403);
+
+  const body = await parseJsonBody(request);
+  if (!body || typeof body.departments !== "object") {
+    return jsonResponse({ error: "Invalid request body" }, 400);
+  }
+
+  const { results: activeOfficers } = await env.DB.prepare("SELECT id FROM officers WHERE is_active = 1").all();
+  const validOfficerIds = new Set(activeOfficers.map((o) => o.id));
+  const clean = sanitizeDepartmentsState(body, validOfficerIds);
+
+  await env.DB
+    .prepare(
+      `INSERT INTO departments (id, data, updated_at, updated_by) VALUES (1, ?, datetime('now'), ?)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+    )
+    .bind(JSON.stringify(clean), officer.id)
+    .run();
+
+  return jsonResponse({ ok: true });
 }
 
 /* ---------------- server stats (Discord join/leave log, Google Sheet CSV) ---------------- */
