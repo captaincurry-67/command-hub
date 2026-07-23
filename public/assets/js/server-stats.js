@@ -62,6 +62,9 @@
     }))
   );
   root.appendChild(chartPanel("Member Growth — Net Since Tracking Began", null, growthChart(stats.growth)));
+  if ((stats.monthlyForecast || []).length) {
+    root.appendChild(chartPanel("Monthly Forecast — Net Growth", forecastLegend(), forecastChart(stats.monthlyForecast)));
+  }
   root.appendChild(monthlyPanel(stats.monthly));
   root.appendChild(recentPanel(stats.recent));
 
@@ -166,6 +169,93 @@
     return legend;
   }
 
+  function forecastLegend() {
+    const legend = document.createElement("div");
+    legend.className = "stats-legend";
+    legend.appendChild(legendItem(COLOR_JOIN, "Actual", "solid"));
+    legend.appendChild(legendItem(COLOR_INTAKE, "Forecast", "striped"));
+    return legend;
+  }
+
+  // One net-growth bar per month; actuals solid green, forecast months
+  // (current-month projection + trend-fitted future months) hatched gold so
+  // they can't be read as actuals. Each bar is labelled with its net value.
+  function forecastChart(data) {
+    const W = 720;
+    const H = 260;
+    const M = { top: 12, right: 8, bottom: 28, left: 40 };
+    const plotW = W - M.left - M.right;
+    const groupW = plotW / data.length;
+    const barW = Math.min(36, Math.max(12, Math.floor(groupW * 0.5)));
+
+    const values = data.map((d) => d.net);
+    const svg = makeSvg(W, H);
+    const y = gridAndScale(svg, W, H, M, Math.min(0, ...values), Math.max(1, ...values));
+    const y0 = y(0);
+
+    data.forEach((d, i) => {
+      const cx = M.left + i * groupW + groupW / 2;
+      const top = Math.min(y(d.net), y0);
+      const height = Math.abs(y(d.net) - y0);
+      const bar = rect(cx - barW / 2, top, barW, height, d.forecast ? "url(#forecast-stripes)" : COLOR_JOIN);
+      if (d.forecast) bar.setAttribute("opacity", "0.85");
+      svg.appendChild(bar);
+
+      // Net value in a dark pill sitting just above each bar's top (below the
+      // bottom for a negative bar) so it pops clear of both fills.
+      const cy = d.net >= 0 ? top - 11 : top + height + 11;
+      svg.appendChild(valuePill(cx, cy, fmtNet(d.net)));
+
+      const label = document.createElementNS(NS, "text");
+      label.setAttribute("x", cx);
+      label.setAttribute("y", H - 8);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("fill", COLOR_MUTED);
+      label.setAttribute("font-size", "10");
+      label.textContent = fmtMonth(d.month);
+      svg.appendChild(label);
+
+      const hover = rect(M.left + i * groupW, M.top, groupW, H - M.top - M.bottom, "transparent");
+      hover.addEventListener("mousemove", (e) => {
+        let detail = `Net: ${fmtNet(d.net)}`;
+        if (d.forecast) {
+          detail += d.actualToDate !== undefined ? ` (forecast — ${fmtNet(d.actualToDate)} so far)` : " (forecast)";
+        }
+        showTip(e, `<strong>${fmtMonthFull(d.month)}</strong><br>${detail}`);
+      });
+      hover.addEventListener("mouseleave", hideTip);
+      svg.appendChild(hover);
+    });
+
+    return svg;
+  }
+
+  // Small dark rounded badge with white text, centred on (cx, cy).
+  function valuePill(cx, cy, text) {
+    const g = document.createElementNS(NS, "g");
+    const w = text.length * 6.5 + 10;
+    const h = 15;
+    const pill = document.createElementNS(NS, "rect");
+    pill.setAttribute("x", cx - w / 2);
+    pill.setAttribute("y", cy - h / 2);
+    pill.setAttribute("width", w);
+    pill.setAttribute("height", h);
+    pill.setAttribute("rx", "4");
+    pill.setAttribute("fill", "#161920");
+    pill.setAttribute("opacity", "0.85");
+    g.appendChild(pill);
+    const label = document.createElementNS(NS, "text");
+    label.setAttribute("x", cx);
+    label.setAttribute("y", cy + 3.5);
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("font-size", "11");
+    label.setAttribute("font-weight", "700");
+    label.setAttribute("fill", "#ffffff");
+    label.textContent = text;
+    g.appendChild(label);
+    return g;
+  }
+
   function legendItem(color, label, style) {
     const item = document.createElement("span");
     item.className = "stats-legend__item";
@@ -187,6 +277,10 @@
       '<pattern id="leave-stripes" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">' +
       `<rect width="6" height="6" fill="${COLOR_LEAVE}"></rect>` +
       '<line x1="0" y1="0" x2="0" y2="6" stroke="#16191f" stroke-width="2" opacity="0.35"></line>' +
+      "</pattern>" +
+      '<pattern id="forecast-stripes" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">' +
+      `<rect width="6" height="6" fill="${COLOR_INTAKE}"></rect>` +
+      '<line x1="0" y1="0" x2="0" y2="6" stroke="#16191f" stroke-width="2" opacity="0.4"></line>' +
       "</pattern>";
     svg.appendChild(defs);
     return svg;
@@ -486,6 +580,16 @@
   }
 
   /* ---------- formatting ---------- */
+
+  function fmtMonth(key) {
+    const [, m] = key.split("-").map(Number);
+    return MONTHS[m - 1];
+  }
+
+  function fmtMonthFull(key) {
+    const [y, m] = key.split("-").map(Number);
+    return `${MONTHS[m - 1]} ${y}`;
+  }
 
   function fmtDate(iso) {
     const [, m, d] = iso.split("-").map(Number);

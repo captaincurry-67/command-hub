@@ -29,6 +29,9 @@ function el(tag, attrs = {}, children = []) {
     if (value === null || value === undefined) continue;
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
+    // on* keys must become real listeners — setAttribute would stringify the
+    // function into a dead inline attribute (this exact gap broke Add Department)
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value);
   }
   for (const child of [].concat(children)) {

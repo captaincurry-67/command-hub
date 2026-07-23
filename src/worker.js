@@ -1208,6 +1208,52 @@ function buildServerStats(events, skippedRows) {
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([month, m]) => ({ month, joins: m.joins, leaves: m.leaves, net: m.joins - m.leaves }));
 
+  // Monthly net forecast: complete months are actuals; the current month is
+  // projected from its trailing 28-day run rate; three further months come from
+  // a least-squares fit over the complete months. Forecast values are estimates,
+  // flagged so the chart can render them hatched.
+  const currentMonthKey = isoDate(new Date(todayUtc)).slice(0, 7);
+  const completeMonths = monthly.filter((m) => m.month < currentMonthKey);
+  const monthlyForecast = completeMonths.map((m) => ({ month: m.month, net: m.net, forecast: false }));
+  if (events.length) {
+    const [cy, cm] = currentMonthKey.split("-").map(Number);
+    const daysInMonth = new Date(Date.UTC(cy, cm, 0)).getUTCDate();
+    const dayOfMonth = new Date(todayUtc).getUTCDate();
+    const mtdNet = monthly.find((m) => m.month === currentMonthKey)?.net ?? 0;
+    const recentNet = counts(events.filter((e) => e.time >= todayUtc - 27 * dayMs)).net;
+    monthlyForecast.push({
+      month: currentMonthKey,
+      net: Math.round(mtdNet + (recentNet / 28) * (daysInMonth - dayOfMonth)),
+      forecast: true,
+      actualToDate: mtdNet,
+    });
+
+    const ys = completeMonths.map((m) => m.net);
+    const n = ys.length;
+    let slope = 0;
+    let intercept = n ? ys.reduce((a, b) => a + b, 0) / n : 0;
+    if (n >= 2) {
+      const meanX = (n - 1) / 2;
+      const meanY = intercept;
+      let num = 0;
+      let den = 0;
+      for (let i = 0; i < n; i++) {
+        num += (i - meanX) * (ys[i] - meanY);
+        den += (i - meanX) * (i - meanX);
+      }
+      slope = num / den;
+      intercept = meanY - slope * meanX;
+    }
+    for (let k = 1; k <= 3; k++) {
+      const d = new Date(Date.UTC(cy, cm - 1 + k, 1));
+      monthlyForecast.push({
+        month: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`,
+        net: Math.round(intercept + slope * (n + k)),
+        forecast: true,
+      });
+    }
+  }
+
   const retention = buildRetention(events, dayMs);
 
   const recent = events
@@ -1224,6 +1270,7 @@ function buildServerStats(events, skippedRows) {
     weekly,
     growth,
     monthly,
+    monthlyForecast,
     retention,
     recent,
     totalEvents: events.length,
