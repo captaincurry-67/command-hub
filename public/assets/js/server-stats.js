@@ -560,10 +560,14 @@
       const [yr, mo] = m.month.split("-").map(Number);
       const f = fc.get(m.month);
       const forecast = f && f.forecast !== null ? fmtNet(f.forecast) : "—";
-      const variance = f && f.forecast !== null && !f.actualPartial ? fmtNet(m.net - f.forecast) : "—";
-      return [`${MONTHS[mo - 1]} ${yr}`, m.joins, m.leaves, fmtNet(m.net), forecast, variance];
+      // Accuracy = actual / forecast (100% = spot on, >100% = beat the forecast).
+      const accuracy =
+        f && f.forecast !== null && f.forecast !== 0 && !f.actualPartial
+          ? `${Math.round((m.net / f.forecast) * 100)}%`
+          : "—";
+      return [`${MONTHS[mo - 1]} ${yr}`, m.joins, m.leaves, fmtNet(m.net), forecast, accuracy];
     });
-    return tablePanel("Monthly Summary", ["Month", "Joins", "Leaves", "Actual", "Forecast", "Δ"], rows);
+    return tablePanel("Monthly Summary", ["Month", "Joins", "Leaves", "Actual", "Forecast", "Accuracy"], rows);
   }
 
   function recentPanel(recent) {
