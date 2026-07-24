@@ -62,10 +62,12 @@
     }))
   );
   root.appendChild(chartPanel("Member Growth — Net Since Tracking Began", null, growthChart(stats.growth)));
-  if ((stats.monthlyForecast || []).length) {
-    root.appendChild(chartPanel("Monthly Forecast — Net Growth", forecastLegend(), forecastChart(stats.monthlyForecast)));
+  if ((stats.forecastVsActual || []).length) {
+    root.appendChild(
+      chartPanel("Monthly Forecast vs Actual — Net Growth", forecastLegend(stats.forecastVsActual), forecastChart(stats.forecastVsActual))
+    );
   }
-  root.appendChild(monthlyPanel(stats.monthly));
+  root.appendChild(monthlyPanel(stats.monthly, stats.forecastVsActual));
   root.appendChild(recentPanel(stats.recent));
 
   /* ---------- text pieces ---------- */
@@ -78,14 +80,33 @@
   }
 
   function metaLine(s) {
+    const wrap = document.createElement("div");
+
+    // Authoritative current-member count (from the hourly anchor) — the drift-proof
+    // headline number, shown above the event-derived tracking summary.
+    if (s.authoritative) {
+      const headline = document.createElement("div");
+      headline.className = "stats-current-members";
+      const strong = document.createElement("strong");
+      strong.textContent = Number(s.authoritative.humanCount).toLocaleString();
+      headline.appendChild(strong);
+      const rest = document.createElement("span");
+      rest.textContent = ` current members · as of ${fmtDateFull(s.authoritative.takenAt.slice(0, 10))}`;
+      headline.appendChild(rest);
+      wrap.appendChild(headline);
+    }
+
     const div = document.createElement("div");
     div.className = "stats-meta";
     let text =
       `Tracking since ${fmtDateFull(s.firstDate)} · ${s.totalEvents} events · ` +
       `${s.retention.uniqueJoiners} unique users · last entry ${fmtDateFull(s.lastDate)}`;
-    if (s.skippedRows > 0) text += ` · ${s.skippedRows} unreadable rows skipped`;
+    if (s.anchorDrift && Math.abs(s.anchorDrift.value) >= 1) {
+      text += ` · reconciliation: ${s.anchorDrift.value > 0 ? "+" : ""}${s.anchorDrift.value} vs authoritative count`;
+    }
     div.textContent = text;
-    return div;
+    wrap.appendChild(div);
+    return wrap;
   }
 
   function cards(s) {
@@ -169,42 +190,59 @@
     return legend;
   }
 
-  function forecastLegend() {
+  function forecastLegend(data) {
     const legend = document.createElement("div");
     legend.className = "stats-legend";
     legend.appendChild(legendItem(COLOR_JOIN, "Actual", "solid"));
-    legend.appendChild(legendItem(COLOR_INTAKE, "Forecast", "striped"));
+    if (data.some((d) => d.forecastSource === "recorded")) {
+      legend.appendChild(legendItem(COLOR_INTAKE, "Forecast (recorded)", "solid"));
+    }
+    if (data.some((d) => d.forecastSource === "modeled")) {
+      legend.appendChild(legendItem(COLOR_INTAKE, "Forecast (modeled)", "striped"));
+    }
     return legend;
   }
 
-  // One net-growth bar per month; actuals solid green, forecast months
-  // (current-month projection + trend-fitted future months) hatched gold so
-  // they can't be read as actuals. Each bar is labelled with its net value.
+  // Forecast vs actual: up to two bars per month — actual (solid green) and forecast
+  // (gold; solid if recorded ahead of time, hatched if modeled/backtested). Each bar
+  // is labelled with its net value; the tooltip adds the variance.
   function forecastChart(data) {
-    const W = 720;
-    const H = 260;
-    const M = { top: 12, right: 8, bottom: 28, left: 40 };
-    const plotW = W - M.left - M.right;
-    const groupW = plotW / data.length;
-    const barW = Math.min(36, Math.max(12, Math.floor(groupW * 0.5)));
+    const H = 270;
+    const M = { top: 14, right: 8, bottom: 28, left: 40 };
+    const groupW = 96;
+    const W = Math.max(720, M.left + M.right + data.length * groupW);
+    const barW = 26;
+    const gap = 3;
 
-    const values = data.map((d) => d.net);
+    const vals = [];
+    for (const d of data) {
+      if (d.actual !== null) vals.push(d.actual);
+      if (d.forecast !== null) vals.push(d.forecast);
+    }
     const svg = makeSvg(W, H);
-    const y = gridAndScale(svg, W, H, M, Math.min(0, ...values), Math.max(1, ...values));
+    const y = gridAndScale(svg, W, H, M, Math.min(0, ...vals), Math.max(1, ...vals));
     const y0 = y(0);
+
+    const drawBar = (cx, value, fill, opacity) => {
+      const top = Math.min(y(value), y0);
+      const height = Math.abs(y(value) - y0);
+      const bar = rect(cx - barW / 2, top, barW, height, fill);
+      if (opacity) bar.setAttribute("opacity", opacity);
+      svg.appendChild(bar);
+      const cy = value >= 0 ? top - 11 : top + height + 11;
+      svg.appendChild(valuePill(cx, cy, fmtNet(value)));
+    };
 
     data.forEach((d, i) => {
       const cx = M.left + i * groupW + groupW / 2;
-      const top = Math.min(y(d.net), y0);
-      const height = Math.abs(y(d.net) - y0);
-      const bar = rect(cx - barW / 2, top, barW, height, d.forecast ? "url(#forecast-stripes)" : COLOR_JOIN);
-      if (d.forecast) bar.setAttribute("opacity", "0.85");
-      svg.appendChild(bar);
+      const hasBoth = d.actual !== null && d.forecast !== null;
+      const actualX = hasBoth ? cx - (barW + gap) / 2 : cx;
+      const forecastX = hasBoth ? cx + (barW + gap) / 2 : cx;
 
-      // Net value in a dark pill sitting just above each bar's top (below the
-      // bottom for a negative bar) so it pops clear of both fills.
-      const cy = d.net >= 0 ? top - 11 : top + height + 11;
-      svg.appendChild(valuePill(cx, cy, fmtNet(d.net)));
+      if (d.actual !== null) drawBar(actualX, d.actual, COLOR_JOIN);
+      if (d.forecast !== null) {
+        drawBar(forecastX, d.forecast, d.forecastSource === "recorded" ? COLOR_INTAKE : "url(#forecast-stripes)", "0.9");
+      }
 
       const label = document.createElementNS(NS, "text");
       label.setAttribute("x", cx);
@@ -217,11 +255,13 @@
 
       const hover = rect(M.left + i * groupW, M.top, groupW, H - M.top - M.bottom, "transparent");
       hover.addEventListener("mousemove", (e) => {
-        let detail = `Net: ${fmtNet(d.net)}`;
-        if (d.forecast) {
-          detail += d.actualToDate !== undefined ? ` (forecast — ${fmtNet(d.actualToDate)} so far)` : " (forecast)";
+        const lines = [];
+        if (d.actual !== null) lines.push(`Actual: ${fmtNet(d.actual)}${d.actualPartial ? " (so far)" : ""}`);
+        if (d.forecast !== null) lines.push(`Forecast: ${fmtNet(d.forecast)} (${d.forecastSource})`);
+        if (d.actual !== null && d.forecast !== null && !d.actualPartial) {
+          lines.push(`Variance: ${fmtNet(d.actual - d.forecast)}`);
         }
-        showTip(e, `<strong>${fmtMonthFull(d.month)}</strong><br>${detail}`);
+        showTip(e, `<strong>${fmtMonthFull(d.month)}</strong><br>${lines.join("<br>")}`);
       });
       hover.addEventListener("mouseleave", hideTip);
       svg.appendChild(hover);
@@ -514,12 +554,16 @@
 
   /* ---------- tables ---------- */
 
-  function monthlyPanel(monthly) {
+  function monthlyPanel(monthly, forecastVsActual) {
+    const fc = new Map((forecastVsActual || []).map((d) => [d.month, d]));
     const rows = monthly.map((m) => {
       const [yr, mo] = m.month.split("-").map(Number);
-      return [`${MONTHS[mo - 1]} ${yr}`, m.joins, m.leaves, fmtNet(m.net)];
+      const f = fc.get(m.month);
+      const forecast = f && f.forecast !== null ? fmtNet(f.forecast) : "—";
+      const variance = f && f.forecast !== null && !f.actualPartial ? fmtNet(m.net - f.forecast) : "—";
+      return [`${MONTHS[mo - 1]} ${yr}`, m.joins, m.leaves, fmtNet(m.net), forecast, variance];
     });
-    return tablePanel("Monthly Summary", ["Month", "Joins", "Leaves", "Net"], rows);
+    return tablePanel("Monthly Summary", ["Month", "Joins", "Leaves", "Actual", "Forecast", "Δ"], rows);
   }
 
   function recentPanel(recent) {

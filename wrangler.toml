@@ -12,3 +12,7 @@ html_handling = "none"
 binding = "DB"
 database_name = "5thmr-command-hub-db"
 database_id = "c27e17f8-84c4-4f85-867d-22e342eed695"
+
+# Hourly authoritative member-count anchor (scheduled() handler in worker.js).
+[triggers]
+crons = ["0 * * * *"]

@@ -26,6 +26,17 @@ const RATE_TARGETS = {
 };
 
 export default {
+  // Hourly Cron Trigger (wrangler.toml [triggers]): the authoritative member-count
+  // anchor, plus locking in this month's forecast for the upcoming months.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      Promise.all([
+        captureMemberSnapshot(env).catch((err) => console.error("snapshot failed", err)),
+        lockInForecasts(env).catch((err) => console.error("forecast lock failed", err)),
+      ])
+    );
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -97,6 +108,7 @@ async function handleApi(request, env, path) {
   if (path === "/api/activity" && method === "GET") return apiGetActivity(request, env, url_(request));
   if (path === "/api/activity/rating" && method === "PUT") return apiPutActivityRating(request, env);
   if (path === "/api/server-stats" && method === "GET") return apiServerStats(request, env);
+  if (path === "/api/member-events" && method === "POST") return apiIngestMemberEvent(request, env);
   if (path === "/api/departments" && method === "GET") return apiGetDepartments(request, env);
   if (path === "/api/departments" && method === "PUT") return apiPutDepartments(request, env);
 
@@ -1007,149 +1019,179 @@ async function apiPutDepartments(request, env) {
   return jsonResponse({ ok: true });
 }
 
-/* ---------------- server stats (Discord join/leave log, Google Sheet CSV) ---------------- */
+/* ---------------- server stats (two-signal: member_events flow + member_snapshots anchor) ---------------- */
 
 const SERVER_STATS_CACHE_MS = 5 * 60 * 1000;
 const SERVER_STATS_WEEKS = 12;
-// Per-isolate cache so we don't re-download the sheet on every page view.
-let serverStatsCache = { url: null, fetchedAt: 0, payload: null };
+// Per-isolate cache so we don't re-query D1 on every page view.
+let serverStatsCache = { fetchedAt: 0, payload: null };
 
 async function apiServerStats(request, env) {
   const officer = await getSessionOfficer(request, env);
   if (!officer) return jsonResponse({ error: "Not authenticated" }, 401);
 
-  if (!env.SHEET_CSV_URL) return jsonResponse({ configured: false });
-
   const now = Date.now();
-  if (
-    serverStatsCache.payload &&
-    serverStatsCache.url === env.SHEET_CSV_URL &&
-    now - serverStatsCache.fetchedAt < SERVER_STATS_CACHE_MS
-  ) {
+  if (serverStatsCache.payload && now - serverStatsCache.fetchedAt < SERVER_STATS_CACHE_MS) {
     return jsonResponse(serverStatsCache.payload);
   }
 
-  const res = await fetch(env.SHEET_CSV_URL, { redirect: "follow" });
-  if (!res.ok) return jsonResponse({ error: "Could not fetch the stats sheet" }, 502);
-  const csv = await res.text();
+  // Flow: every join/leave event, oldest first.
+  const { results: rows } = await env.DB
+    .prepare("SELECT username, action, occurred_at FROM member_events ORDER BY occurred_at")
+    .all();
+  const events = rows
+    .map((r) => ({ time: Date.parse(r.occurred_at), user: r.username || "", action: r.action }))
+    .filter((e) => !Number.isNaN(e.time) && (e.action === "join" || e.action === "leave"));
 
-  const { events, skippedRows } = parseJoinLeaveCsv(csv);
-  const payload = buildServerStats(events, skippedRows);
-  serverStatsCache = { url: env.SHEET_CSV_URL, fetchedAt: now, payload };
+  const payload = buildServerStats(events, 0);
+  payload.configured = true;
+
+  // Prefer locked-in (recorded-ahead-of-time) forecasts over the modeled backtest.
+  const { results: recorded } = await env.DB
+    .prepare("SELECT target_month, forecast_net FROM forecast_snapshots")
+    .all();
+  if (recorded.length && payload.forecastVsActual) {
+    const byMonth = new Map(recorded.map((r) => [r.target_month, r.forecast_net]));
+    for (const row of payload.forecastVsActual) {
+      if (byMonth.has(row.month)) {
+        row.forecast = byMonth.get(row.month);
+        row.forecastSource = "recorded";
+      }
+    }
+  }
+
+  // Stock: reconcile against the authoritative count anchors.
+  const latest = await env.DB
+    .prepare("SELECT human_count, taken_at FROM member_snapshots ORDER BY taken_at DESC LIMIT 1")
+    .first();
+  if (latest) {
+    payload.authoritative = { humanCount: latest.human_count, takenAt: latest.taken_at };
+    // Drift = how far the event stream diverged from truth over the anchored window
+    // (needs ≥2 snapshots): true net change vs event-derived net change between them.
+    const earliest = await env.DB
+      .prepare("SELECT human_count, taken_at FROM member_snapshots ORDER BY taken_at ASC LIMIT 1")
+      .first();
+    if (earliest && earliest.taken_at !== latest.taken_at) {
+      const t0 = Date.parse(earliest.taken_at);
+      const t1 = Date.parse(latest.taken_at);
+      const eventNet = events
+        .filter((e) => e.time >= t0 && e.time <= t1)
+        .reduce((acc, e) => acc + (e.action === "join" ? 1 : -1), 0);
+      const trueNet = latest.human_count - earliest.human_count;
+      payload.anchorDrift = { value: trueNet - eventNet, since: earliest.taken_at };
+    }
+  }
+
+  serverStatsCache = { fetchedAt: now, payload };
   return jsonResponse(payload);
 }
 
-function parseCsvRows(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      field = "";
-      rows.push(row);
-      row = [];
-    } else {
-      field += ch;
+// Bot posts each join/leave here (shared-secret auth — the bot has no login session).
+async function apiIngestMemberEvent(request, env) {
+  const key = request.headers.get("X-Ingest-Key") || "";
+  if (!env.INGEST_SECRET || !timingSafeEqual(key, env.INGEST_SECRET)) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+  const body = await parseJsonBody(request);
+  if (!body) return jsonResponse({ error: "Invalid request body" }, 400);
+  const action = String(body.action || "").toLowerCase();
+  if (action !== "join" && action !== "leave") return jsonResponse({ error: "Invalid action" }, 400);
+
+  const discordUserId = body.discordUserId ? String(body.discordUserId) : null;
+  const username = body.username ? String(body.username).slice(0, 100) : null;
+  const occurredAt =
+    typeof body.occurredAt === "string" && !Number.isNaN(Date.parse(body.occurredAt))
+      ? new Date(body.occurredAt).toISOString()
+      : new Date().toISOString();
+  const eventKey = `${discordUserId || username || "?"}:${action}:${occurredAt}`;
+
+  await env.DB
+    .prepare(
+      `INSERT INTO member_events (discord_user_id, username, action, occurred_at, event_key, source)
+       VALUES (?, ?, ?, ?, ?, 'bot') ON CONFLICT(event_key) DO NOTHING`
+    )
+    .bind(discordUserId, username, action, occurredAt, eventKey)
+    .run();
+
+  serverStatsCache = { fetchedAt: 0, payload: null }; // invalidate so the page reflects it soon
+  return jsonResponse({ ok: true });
+}
+
+// Hourly anchor: fetch the full member list from Discord, count humans (incl.
+// pending, excl. bots), store just the count. No-ops if unconfigured.
+async function captureMemberSnapshot(env) {
+  if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_GUILD_ID) return;
+
+  let after = "0";
+  let humanCount = 0;
+  let rawCount = 0;
+  for (let page = 0; page < 50; page++) {
+    const url = `https://discord.com/api/v10/guilds/${env.DISCORD_GUILD_ID}/members?limit=1000&after=${after}`;
+    const res = await fetch(url, { headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}` } });
+    if (!res.ok) throw new Error(`Discord members fetch ${res.status}`);
+    const members = await res.json();
+    if (!Array.isArray(members) || members.length === 0) break;
+    for (const m of members) {
+      rawCount++;
+      if (!m.user?.bot) humanCount++;
+    }
+    if (members.length < 1000) break;
+    after = members[members.length - 1].user.id;
+  }
+
+  await env.DB
+    .prepare("INSERT INTO member_snapshots (human_count, raw_count, source) VALUES (?, ?, 'cron')")
+    .bind(humanCount, rawCount)
+    .run();
+  serverStatsCache = { fetchedAt: 0, payload: null };
+}
+
+// Lock in the forecast for each upcoming month (first-writer-wins per month), so we
+// can later compare what we predicted ahead of time against what actually happened.
+async function lockInForecasts(env) {
+  const { results: rows } = await env.DB
+    .prepare("SELECT username, action, occurred_at FROM member_events ORDER BY occurred_at")
+    .all();
+  const events = rows
+    .map((r) => ({ time: Date.parse(r.occurred_at), user: r.username || "", action: r.action }))
+    .filter((e) => !Number.isNaN(e.time) && (e.action === "join" || e.action === "leave"));
+  if (!events.length) return;
+
+  const { forecastVsActual } = buildServerStats(events, 0);
+  for (const row of (forecastVsActual || [])) {
+    // Future months only (no actual yet) with a computed forecast.
+    if (row.actual === null && row.forecast !== null) {
+      await env.DB
+        .prepare("INSERT INTO forecast_snapshots (target_month, forecast_net) VALUES (?, ?) ON CONFLICT(target_month) DO NOTHING")
+        .bind(row.month, row.forecast)
+        .run();
     }
   }
-  if (field.length || row.length) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows;
 }
 
-function parseJoinLeaveCsv(csv) {
-  const rows = parseCsvRows(csv).filter((r) => r.some((c) => c.trim() !== ""));
-  if (!rows.length) return { events: [], skippedRows: 0 };
-
-  // Columns default to Date, User, Action; a header row (if present) can reorder them.
-  let dateCol = 0;
-  let userCol = 1;
-  let actionCol = 2;
-  let start = 0;
-  const header = rows[0].map((c) => c.trim().toLowerCase());
-  if (header.some((c) => c.includes("date") || c.includes("user") || c.includes("action"))) {
-    start = 1;
-    const find = (...names) => header.findIndex((c) => names.some((n) => c.includes(n)));
-    const d = find("date", "time");
-    if (d !== -1) dateCol = d;
-    const u = find("user", "name", "member");
-    if (u !== -1) userCol = u;
-    const a = find("action", "join", "leave", "event", "type", "status");
-    if (a !== -1) actionCol = a;
-  }
-
-  const dayFirst = detectDayFirst(rows, dateCol, start);
-  const events = [];
-  let skippedRows = 0;
-  for (let i = start; i < rows.length; i++) {
-    const time = parseEventDate(rows[i][dateCol], dayFirst);
-    const user = (rows[i][userCol] || "").trim();
-    const action = normalizeAction(rows[i][actionCol]);
-    if (time === null || !action) {
-      skippedRows++;
-      continue;
-    }
-    events.push({ time, user, action });
-  }
-  events.sort((a, b) => a.time - b.time);
-  return { events, skippedRows };
+// "YYYY-MM" ⇄ absolute month index, for month arithmetic.
+function monthIndexOf(key) {
+  const [y, m] = key.split("-").map(Number);
+  return y * 12 + (m - 1);
 }
-
-// Slash dates are ambiguous (7/6 vs 6/7). If any row proves the order, trust it;
-// otherwise assume day-first — this unit writes dates as DD/M/YY.
-function detectDayFirst(rows, dateCol, start) {
-  for (let i = start; i < rows.length; i++) {
-    const m = (rows[i][dateCol] || "").trim().match(/^(\d{1,2})\/(\d{1,2})\//);
-    if (!m) continue;
-    if (+m[1] > 12) return true;
-    if (+m[2] > 12) return false;
-  }
-  return true;
+function monthKeyOf(idx) {
+  const y = Math.floor(idx / 12);
+  const m = (idx % 12) + 1;
+  return `${y}-${String(m).padStart(2, "0")}`;
 }
-
-function parseEventDate(raw, dayFirst) {
-  const s = (raw || "").trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (m) {
-    let year = +m[3];
-    if (year < 100) year += 2000;
-    const day = dayFirst ? +m[1] : +m[2];
-    const month = dayFirst ? +m[2] : +m[1];
-    return Date.UTC(year, month - 1, day);
+// Least-squares line y=a+bx over {x,y} points; predict y at x.
+function linearFitPredict(points, x) {
+  const n = points.length;
+  const mx = points.reduce((s, p) => s + p.x, 0) / n;
+  const my = points.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const p of points) {
+    num += (p.x - mx) * (p.y - my);
+    den += (p.x - mx) * (p.x - mx);
   }
-  const t = Date.parse(s);
-  return Number.isNaN(t) ? null : t;
-}
-
-function normalizeAction(raw) {
-  const s = (raw || "").trim().toLowerCase();
-  if (s.startsWith("j")) return "join";
-  if (s.startsWith("l")) return "leave";
-  return null;
+  const b = den ? num / den : 0;
+  return my - b * mx + b * x;
 }
 
 function buildServerStats(events, skippedRows) {
@@ -1254,6 +1296,40 @@ function buildServerStats(events, skippedRows) {
     }
   }
 
+  // Forecast vs actual, per month: actual net (event-derived; current month partial),
+  // and a *modeled* forecast — a per-month backtest that fits the trend on only the
+  // complete months BEFORE that month and predicts it. apiServerStats later overrides
+  // the forecast with a recorded (locked-in-ahead-of-time) value where one exists.
+  const forecastVsActual = [];
+  if (monthly.length) {
+    const firstIdx = monthIndexOf(monthly[0].month);
+    const curIdx = monthIndexOf(currentMonthKey);
+    const actualByMonth = new Map(monthly.map((m) => [m.month, m.net]));
+    const completePts = completeMonths.map((m) => ({ x: monthIndexOf(m.month) - firstIdx, y: m.net }));
+    const mtdNet = actualByMonth.get(currentMonthKey) ?? 0;
+
+    for (let idx = firstIdx; idx <= curIdx + 3; idx++) {
+      const month = monthKeyOf(idx);
+      const off = idx - firstIdx;
+      let actual = null;
+      let actualPartial = false;
+      if (idx < curIdx) actual = actualByMonth.get(month) ?? 0;
+      else if (idx === curIdx) {
+        actual = mtdNet;
+        actualPartial = true;
+      }
+      const priors = completePts.filter((p) => p.x < off);
+      const forecast = priors.length >= 2 ? Math.round(linearFitPredict(priors, off)) : null;
+      forecastVsActual.push({
+        month,
+        actual,
+        actualPartial,
+        forecast,
+        forecastSource: forecast === null ? null : "modeled",
+      });
+    }
+  }
+
   const retention = buildRetention(events, dayMs);
 
   const recent = events
@@ -1271,6 +1347,7 @@ function buildServerStats(events, skippedRows) {
     growth,
     monthly,
     monthlyForecast,
+    forecastVsActual,
     retention,
     recent,
     totalEvents: events.length,

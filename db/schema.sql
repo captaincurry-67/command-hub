@@ -67,7 +67,38 @@ CREATE TABLE IF NOT EXISTS hierarchy_history (
   changed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Two-signal Discord member tracking (migration 005). member_events = flow (join/leave
+-- events from the bot); member_snapshots = stock (hourly authoritative member-count anchors).
+CREATE TABLE IF NOT EXISTS member_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  discord_user_id TEXT,
+  username TEXT,
+  action TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  event_key TEXT UNIQUE,
+  source TEXT NOT NULL DEFAULT 'bot',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS member_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  taken_at TEXT NOT NULL DEFAULT (datetime('now')),
+  human_count INTEGER NOT NULL,
+  raw_count INTEGER,
+  source TEXT NOT NULL DEFAULT 'cron'
+);
+
+-- Locked-in monthly forecasts (migration 006), first-writer-wins per target_month.
+CREATE TABLE IF NOT EXISTS forecast_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_month TEXT UNIQUE,
+  forecast_net INTEGER NOT NULL,
+  made_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_officer ON sessions(officer_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_officer ON password_resets(officer_id);
 CREATE INDEX IF NOT EXISTS idx_ratings_officer ON activity_ratings(officer_id);
 CREATE INDEX IF NOT EXISTS idx_officers_current_position ON officers(current_position_id);
+CREATE INDEX IF NOT EXISTS idx_member_events_time ON member_events(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_member_snapshots_time ON member_snapshots(taken_at);
