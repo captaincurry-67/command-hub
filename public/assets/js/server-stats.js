@@ -129,7 +129,7 @@
     ]));
     const r = s.retention;
     wrap.appendChild(card("Retention", [
-      ["Median stay", r.medianStayDays === null ? "—" : `${r.medianStayDays} days`, "plain"],
+      ["Median tenure", r.medianTenureDays == null ? "—" : `${r.medianTenureDays} days`, "plain"],
       ["Left within 7 days", r.quickQuitPct === null ? "—" : `${r.quickQuitPct}%`, "leave"],
       ["Rejoined users", r.rejoiners, "plain"],
     ]));

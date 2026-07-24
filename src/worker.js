@@ -1043,7 +1043,20 @@ async function apiServerStats(request, env) {
     .map((r) => ({ time: Date.parse(r.occurred_at), user: r.username || "", action: r.action }))
     .filter((e) => !Number.isNaN(e.time) && (e.action === "join" || e.action === "leave"));
 
-  const payload = buildServerStats(events, 0);
+  // Present members' join dates (from the latest directory sync) → tenure-based retention.
+  const dirLatest = await env.DB
+    .prepare("SELECT MAX(last_seen_at) AS m FROM member_directory")
+    .first();
+  let present = [];
+  if (dirLatest && dirLatest.m) {
+    const { results: pres } = await env.DB
+      .prepare("SELECT joined_at FROM member_directory WHERE last_seen_at = ? AND joined_at IS NOT NULL")
+      .bind(dirLatest.m)
+      .all();
+    present = pres.map((r) => ({ joinedAt: r.joined_at }));
+  }
+
+  const payload = buildServerStats(events, 0, present);
   payload.configured = true;
 
   // Prefer locked-in (recorded-ahead-of-time) forecasts over the modeled backtest.
@@ -1125,6 +1138,7 @@ async function captureMemberSnapshot(env) {
   let after = "0";
   let humanCount = 0;
   let rawCount = 0;
+  const humans = []; // {id, username, joinedAt} for the directory refresh
   for (let page = 0; page < 50; page++) {
     const url = `https://discord.com/api/v10/guilds/${env.DISCORD_GUILD_ID}/members?limit=1000&after=${after}`;
     const res = await fetch(url, { headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}` } });
@@ -1133,7 +1147,14 @@ async function captureMemberSnapshot(env) {
     if (!Array.isArray(members) || members.length === 0) break;
     for (const m of members) {
       rawCount++;
-      if (!m.user?.bot) humanCount++;
+      if (!m.user?.bot) {
+        humanCount++;
+        humans.push({
+          id: m.user.id,
+          username: m.user.username || m.user.global_name || null,
+          joinedAt: m.joined_at || null,
+        });
+      }
     }
     if (members.length < 1000) break;
     after = members[members.length - 1].user.id;
@@ -1143,7 +1164,38 @@ async function captureMemberSnapshot(env) {
     .prepare("INSERT INTO member_snapshots (human_count, raw_count, source) VALUES (?, ?, 'cron')")
     .bind(humanCount, rawCount)
     .run();
+
+  // Keep each present member's joined_at for tenure-based retention (staleness-gated
+  // to ~daily so this doesn't burn D1 free-tier writes every hour).
+  await refreshMemberDirectory(env, humans);
+
   serverStatsCache = { fetchedAt: 0, payload: null };
+}
+
+// Upsert the current human roster into member_directory, at most ~once per 20h.
+// last_seen_at stamps this run, so "present now" = rows at MAX(last_seen_at); members
+// who have since left simply keep their older last_seen_at and drop out of that set.
+async function refreshMemberDirectory(env, humans) {
+  if (!humans.length) return;
+  const last = await env.DB.prepare("SELECT MAX(last_seen_at) AS m FROM member_directory").first();
+  const lastMs = last && last.m ? Date.parse(last.m) : NaN;
+  const STALE_MS = 20 * 60 * 60 * 1000;
+  if (!Number.isNaN(lastMs) && Date.now() - lastMs < STALE_MS) return; // still fresh — skip writes
+
+  const seenAt = new Date().toISOString();
+  const stmt = env.DB.prepare(
+    `INSERT INTO member_directory (discord_user_id, username, joined_at, last_seen_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(discord_user_id) DO UPDATE SET
+       username = excluded.username,
+       joined_at = excluded.joined_at,
+       last_seen_at = excluded.last_seen_at`
+  );
+  const bound = humans.map((h) => stmt.bind(h.id, h.username, h.joinedAt, seenAt));
+  const CHUNK = 100; // stay well under D1's per-batch statement cap
+  for (let i = 0; i < bound.length; i += CHUNK) {
+    await env.DB.batch(bound.slice(i, i + CHUNK));
+  }
 }
 
 // Lock in the forecast for each upcoming month (first-writer-wins per month), so we
@@ -1194,7 +1246,7 @@ function linearFitPredict(points, x) {
   return my - b * mx + b * x;
 }
 
-function buildServerStats(events, skippedRows) {
+function buildServerStats(events, skippedRows, present = []) {
   const counts = (list) => {
     let joins = 0;
     let leaves = 0;
@@ -1330,7 +1382,7 @@ function buildServerStats(events, skippedRows) {
     }
   }
 
-  const retention = buildRetention(events, dayMs);
+  const retention = buildRetention(events, dayMs, present, now.getTime());
 
   const recent = events
     .slice(-25)
@@ -1359,7 +1411,9 @@ function buildServerStats(events, skippedRows) {
 
 // Pairs each user's Join with their next Leave (a "stint") to measure how long
 // people stay. Leaves with no prior Join (joined before the log began) are ignored.
-function buildRetention(events, dayMs) {
+// `present` = current members' join dates from Discord (member_directory), used to
+// measure the tenure of people who are STILL here — which completed stints can't see.
+function buildRetention(events, dayMs, present = [], nowMs = Date.now()) {
   const byUser = new Map();
   for (const e of events) {
     if (!byUser.has(e.user)) byUser.set(e.user, []);
@@ -1393,5 +1447,26 @@ function buildRetention(events, dayMs) {
     ? Math.round((stayDays.filter((d) => d <= 7).length / stayDays.length) * 100)
     : null;
 
-  return { uniqueJoiners, rejoiners, openStints, completedStints: stayDays.length, medianStayDays, quickQuitPct };
+  // Tenure of members STILL in the server (censored durations from Discord's
+  // joined_at). Unlike medianStayDays (completed stints only, biased toward
+  // quick-quitters), this counts everyone currently present, however long ago
+  // they joined — the honest "how long do members stay" signal.
+  const tenureDays = [];
+  for (const p of present) {
+    const t = Date.parse(p.joinedAt);
+    if (!Number.isNaN(t) && t <= nowMs) tenureDays.push(Math.round((nowMs - t) / dayMs));
+  }
+  tenureDays.sort((a, b) => a - b);
+  const medianTenureDays = tenureDays.length ? tenureDays[Math.floor(tenureDays.length / 2)] : null;
+
+  return {
+    uniqueJoiners,
+    rejoiners,
+    openStints,
+    completedStints: stayDays.length,
+    medianStayDays,
+    quickQuitPct,
+    medianTenureDays,
+    presentCount: tenureDays.length,
+  };
 }

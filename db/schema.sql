@@ -96,9 +96,19 @@ CREATE TABLE IF NOT EXISTS forecast_snapshots (
   made_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Current-member directory (migration 007): present members' joined_at, refreshed
+-- ~daily by the cron, so retention can count people still in the server (tenure).
+CREATE TABLE IF NOT EXISTS member_directory (
+  discord_user_id TEXT PRIMARY KEY,
+  username        TEXT,
+  joined_at       TEXT,
+  last_seen_at    TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_officer ON sessions(officer_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_officer ON password_resets(officer_id);
 CREATE INDEX IF NOT EXISTS idx_ratings_officer ON activity_ratings(officer_id);
 CREATE INDEX IF NOT EXISTS idx_officers_current_position ON officers(current_position_id);
 CREATE INDEX IF NOT EXISTS idx_member_events_time ON member_events(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_member_snapshots_time ON member_snapshots(taken_at);
+CREATE INDEX IF NOT EXISTS idx_member_directory_seen ON member_directory(last_seen_at);
